@@ -180,7 +180,7 @@ public class ChatServer {
                 if (receiverHandler != null) {
                     receiverHandler.sendMessage("PRIVATE:" + username + ":" + msg);
                     saveMessageToFile(username, receiver, msg, null);
-                    sendMessage("PRIVATE:" + username + ":" + msg);
+                    // Xóa dòng: sendMessage("PRIVATE:" + username + ":" + msg);
                 } else {
                     sendMessage("ERROR: Người dùng " + receiver + " đang offline");
                 }

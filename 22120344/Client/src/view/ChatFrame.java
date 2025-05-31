@@ -17,9 +17,9 @@ public class ChatFrame extends JFrame {
     private Socket socket;
     private PrintWriter out;
     private BufferedReader in;
-    private String currentReceiver; // Người nhận hiện tại (người dùng hoặc nhóm)
+    private String currentReceiver;
 
-    private JEditorPane chatArea; // Thay JTextArea bằng JEditorPane để hỗ trợ HTML
+    private JEditorPane chatArea;
     private JTextField messageField;
     private JList<String> onlineUsersList;
     private DefaultListModel<String> onlineUsersModel;
@@ -57,7 +57,6 @@ public class ChatFrame extends JFrame {
         mainPanel.setBorder(new EmptyBorder(10, 10, 10, 10));
         mainPanel.setBackground(new Color(240, 240, 240));
 
-        // Sidebar: Online users and groups
         JPanel usersPanel = new JPanel(new BorderLayout());
         usersPanel.setBorder(BorderFactory.createTitledBorder("Người dùng và Nhóm"));
         usersPanel.setPreferredSize(new Dimension(200, 0));
@@ -75,7 +74,6 @@ public class ChatFrame extends JFrame {
         receiverLabel.setBorder(new EmptyBorder(5, 5, 5, 5));
         usersPanel.add(receiverLabel, BorderLayout.NORTH);
 
-        // Chat area
         chatArea = new JEditorPane();
         chatArea.setContentType("text/html");
         chatArea.setEditable(false);
@@ -85,7 +83,6 @@ public class ChatFrame extends JFrame {
         chatArea.setText("<html><body style='font-family: Arial; font-size: 14px; padding: 10px;'></body></html>");
         JScrollPane chatScrollPane = new JScrollPane(chatArea);
 
-        // Message input panel
         JPanel inputPanel = new JPanel(new BorderLayout());
         messageField = new JTextField();
         messageField.setFont(new Font("Arial", Font.PLAIN, 14));
@@ -145,7 +142,7 @@ public class ChatFrame extends JFrame {
         if (selected != null && !selected.startsWith("--")) {
             currentReceiver = selected;
             receiverLabel.setText("Đang chat với: " + selected);
-            System.out.println("Selected receiver: " + currentReceiver); // Log
+            System.out.println("Selected receiver: " + currentReceiver);
             loadConversationHistory();
         } else {
             currentReceiver = "";
@@ -159,7 +156,6 @@ public class ChatFrame extends JFrame {
     }
 
     private void appendMessage(String sender, String message, boolean isSent, boolean isGroup) {
-        // Escape HTML để tránh lỗi ký tự đặc biệt
         message = message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#39;");
 
         String bubbleStyle = isSent ?
@@ -178,9 +174,8 @@ public class ChatFrame extends JFrame {
         }
         String newContent = currentContent.replace("</body>", html + "</body>");
         chatArea.setText(newContent);
-        System.out.println("Appended message: " + sender + ": " + message); // Log
+        System.out.println("Appended message: " + sender + ": " + message);
 
-        // Cuộn xuống cuối
         SwingUtilities.invokeLater(() -> {
             JScrollPane scrollPane = (JScrollPane) chatArea.getParent().getParent();
             JScrollBar vertical = scrollPane.getVerticalScrollBar();
@@ -208,7 +203,7 @@ public class ChatFrame extends JFrame {
         try {
             String message;
             while ((message = in.readLine()) != null) {
-                System.out.println("Received: " + message); // Log
+                System.out.println("Received: " + message);
                 if (message.startsWith("ONLINE_USERS_AND_GROUPS:")) {
                     updateOnlineUsersAndGroups(message.substring("ONLINE_USERS_AND_GROUPS:".length()));
                 } else if (message.startsWith("FILE:")) {
@@ -220,9 +215,11 @@ public class ChatFrame extends JFrame {
                     if (parts.length == 3) {
                         String sender = parts[1];
                         String msg = parts[2];
-                        saveMessageToFile(sender, username, msg); // Lưu tin nhắn nhận được
-                        if (currentReceiver != null && currentReceiver.equals(sender)) {
-                            appendMessage(sender, msg, false, false);
+                        if (!sender.equals(username)) { // Bỏ qua tin nhắn từ chính mình
+                            saveMessageToFile(sender, username, msg);
+                            if (currentReceiver != null && currentReceiver.equals(sender)) {
+                                appendMessage(sender, msg, false, false);
+                            }
                         }
                     }
                 } else if (message.startsWith("GROUP:")) {
@@ -231,7 +228,7 @@ public class ChatFrame extends JFrame {
                         String groupName = parts[1];
                         String sender = parts[2];
                         String msg = parts[3];
-                        saveMessageToFile(sender, groupName, msg); // Lưu tin nhắn nhóm
+                        saveMessageToFile(sender, groupName, msg);
                         if (currentReceiver != null && currentReceiver.equals(groupName)) {
                             appendMessage(sender, msg, sender.equals(username), true);
                         }
@@ -270,11 +267,11 @@ public class ChatFrame extends JFrame {
         if (!message.isEmpty() && currentReceiver != null && !currentReceiver.startsWith("--")) {
             if (currentReceiver.startsWith("GROUP_")) {
                 out.println("GROUP:" + currentReceiver + ":" + message);
-                saveMessageToFile(username, currentReceiver, message); // Lưu tin nhắn nhóm
+                saveMessageToFile(username, currentReceiver, message);
             } else {
                 out.println("PRIVATE:" + currentReceiver + ":" + message);
                 appendMessage(username, message, true, false);
-                saveMessageToFile(username, currentReceiver, message); // Lưu tin nhắn riêng
+                saveMessageToFile(username, currentReceiver, message);
             }
             messageField.setText("");
         } else {
@@ -296,7 +293,7 @@ public class ChatFrame extends JFrame {
                 writer.write(formattedMessage);
                 writer.newLine();
             }
-            System.out.println("Saved to " + fileName + ": " + formattedMessage); // Log
+            System.out.println("Saved to " + fileName + ": " + formattedMessage);
         } catch (IOException e) {
             e.printStackTrace();
             JOptionPane.showMessageDialog(this, "Lỗi khi lưu tin nhắn vào lịch sử: " + e.getMessage(),
@@ -418,16 +415,15 @@ public class ChatFrame extends JFrame {
         clearChatArea();
         if (currentReceiver != null && !currentReceiver.isEmpty()) {
             String filePath = getChatFileName(username, currentReceiver);
-            System.out.println("Loading history from: " + filePath); // Log
+            System.out.println("Loading history from: " + filePath);
             File file = new File(filePath);
+            Set<String> displayedMessages = new HashSet<>(); // Ngăn lặp tin nhắn
             if (file.exists()) {
                 try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
                     String line;
                     while ((line = reader.readLine()) != null) {
-                        // Định dạng: [yyyy-MM-dd HH:mm:ss] sender: message
-                        if (!line.trim().isEmpty()) {
+                        if (!line.trim().isEmpty() && !displayedMessages.contains(line)) {
                             try {
-                                // Tìm dấu thời gian
                                 if (line.startsWith("[")) {
                                     int timestampEnd = line.indexOf(']');
                                     if (timestampEnd != -1) {
@@ -438,7 +434,8 @@ public class ChatFrame extends JFrame {
                                             boolean isSent = sender.equals(username);
                                             boolean isGroup = currentReceiver.startsWith("GROUP_");
                                             appendMessage(sender, message, isSent, isGroup);
-                                            System.out.println("Loaded: " + line); // Log
+                                            displayedMessages.add(line);
+                                            System.out.println("Loaded: " + line);
                                         }
                                     }
                                 }
