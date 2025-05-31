@@ -73,7 +73,6 @@ public class DatabaseInfoUI extends JFrame {
         button.setAlignmentX(Component.CENTER_ALIGNMENT);
         button.setFocusPainted(false);
         button.setBackground(bgColor);
-        button.setForeground(Color.WHITE);
         button.setPreferredSize(new Dimension(120, 40));
         button.setFont(new Font("Arial", Font.BOLD, 14));
     }

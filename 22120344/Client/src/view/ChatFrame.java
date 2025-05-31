@@ -110,7 +110,6 @@ public class ChatFrame extends JFrame {
     private void styleButton(JButton button, Color bgColor) {
         button.setFocusPainted(false);
         button.setBackground(bgColor);
-        button.setForeground(Color.WHITE);
         button.setFont(new Font("Arial", Font.BOLD, 12));
         button.setBorder(new LineBorder(bgColor.darker(), 1));
     }
@@ -118,7 +117,6 @@ public class ChatFrame extends JFrame {
     private void styleGroupButton(JButton button, Color bgColor) {
         button.setFocusPainted(false);
         button.setBackground(bgColor);
-        button.setForeground(Color.WHITE);
         button.setFont(new Font("Arial", Font.BOLD, 12));
         button.setBorder(new LineBorder(bgColor.darker(), 1));
     }
