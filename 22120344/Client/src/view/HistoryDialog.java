@@ -4,6 +4,7 @@ import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
+import java.awt.event.*;
 import java.io.*;
 import java.text.SimpleDateFormat;
 import java.util.*;
@@ -41,6 +42,24 @@ public class HistoryDialog extends JDialog {
         };
         historyTable = new JTable(tableModel);
         historyTable.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
+
+        // Thêm menu ngữ cảnh khi nhấp chuột phải
+        JPopupMenu popupMenu = new JPopupMenu();
+        JMenuItem deleteItem = new JMenuItem("Xóa");
+        deleteItem.addActionListener(e -> deleteSingleMessage());
+        popupMenu.add(deleteItem);
+
+        historyTable.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseReleased(MouseEvent e) {
+                if (e.isPopupTrigger() && historyTable.getSelectedRowCount() == 1) {
+                    int row = historyTable.rowAtPoint(e.getPoint());
+                    historyTable.setRowSelectionInterval(row, row);
+                    popupMenu.show(historyTable, e.getX(), e.getY());
+                }
+            }
+        });
+
         JScrollPane scrollPane = new JScrollPane(historyTable);
 
         deleteButton = new JButton("Xóa tin nhắn đã chọn");
@@ -100,6 +119,64 @@ public class HistoryDialog extends JDialog {
                     }
                 }
             }
+        }
+    }
+
+    private void deleteSingleMessage() {
+        int selectedRow = historyTable.getSelectedRow();
+        if (selectedRow == -1) {
+            JOptionPane.showMessageDialog(this, "Vui lòng chọn một tin nhắn để xóa.",
+                    "Thông tin", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        String sender = (String) tableModel.getValueAt(selectedRow, 1);
+        String receiver = (String) tableModel.getValueAt(selectedRow, 2);
+        String timestamp = (String) tableModel.getValueAt(selectedRow, 0);
+        String message = (String) tableModel.getValueAt(selectedRow, 3);
+        String fileName = getChatFileName(sender, receiver);
+        String lineToDelete = "[" + timestamp + "] " + sender + ":" + message;
+
+        // Xóa dòng khỏi file lịch sử
+        File file = new File(fileName);
+        List<String> remainingLines = new ArrayList<>();
+        boolean found = false;
+        try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (!line.equals(lineToDelete)) {
+                    remainingLines.add(line);
+                } else {
+                    found = true;
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+            JOptionPane.showMessageDialog(this, "Lỗi khi đọc file lịch sử: " + e.getMessage(),
+                    "Lỗi", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        if (found) {
+            try (BufferedWriter writer = new BufferedWriter(new FileWriter(file))) {
+                for (String line : remainingLines) {
+                    writer.write(line);
+                    writer.newLine();
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+                JOptionPane.showMessageDialog(this, "Lỗi khi cập nhật file lịch sử: " + e.getMessage(),
+                        "Lỗi", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            // Xóa dòng khỏi bảng
+            tableModel.removeRow(selectedRow);
+            JOptionPane.showMessageDialog(this, "Đã xóa tin nhắn.",
+                    "Thành công", JOptionPane.INFORMATION_MESSAGE);
+        } else {
+            JOptionPane.showMessageDialog(this, "Không tìm thấy tin nhắn trong file lịch sử.",
+                    "Lỗi", JOptionPane.ERROR_MESSAGE);
         }
     }
 

@@ -4,6 +4,8 @@ import Client.src.Controller.DatabaseConnection;
 import javax.swing.*;
 import javax.swing.border.*;
 import javax.swing.text.html.HTMLEditorKit;
+import javax.swing.text.html.HTMLDocument;
+import javax.swing.text.Element;
 import java.awt.*;
 import java.awt.event.*;
 import java.io.*;
@@ -27,6 +29,24 @@ public class ChatFrame extends JFrame {
 
     private static final String HISTORY_DIR = "chat_history";
     private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+    private List<MessageInfo> messages = new ArrayList<>();
+    private int messageCounter = 0;
+
+    private static class MessageInfo {
+        String timestamp;
+        String sender;
+        String message;
+        String receiver;
+        String messageId;
+
+        MessageInfo(String timestamp, String sender, String message, String receiver, String messageId) {
+            this.timestamp = timestamp;
+            this.sender = sender;
+            this.message = message;
+            this.receiver = receiver;
+            this.messageId = messageId;
+        }
+    }
 
     public ChatFrame(String username) {
         this.username = username;
@@ -81,6 +101,41 @@ public class ChatFrame extends JFrame {
         chatArea.setBorder(new LineBorder(new Color(200, 200, 200)));
         chatArea.setEditorKit(new HTMLEditorKit());
         chatArea.setText("<html><body style='font-family: Arial; font-size: 14px; padding: 10px;'></body></html>");
+
+        JPopupMenu popupMenu = new JPopupMenu();
+        JMenuItem deleteItem = new JMenuItem("Xóa");
+        deleteItem.addActionListener(e -> deleteMessage());
+        popupMenu.add(deleteItem);
+
+        chatArea.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) {
+                checkPopup(e);
+            }
+            @Override
+            public void mouseReleased(MouseEvent e) {
+                checkPopup(e);
+            }
+            private void checkPopup(MouseEvent e) {
+                if (e.isPopupTrigger()) {
+                    int pos = chatArea.viewToModel(e.getPoint());
+                    HTMLDocument doc = (HTMLDocument) chatArea.getDocument();
+                    Element elem = doc.getCharacterElement(pos);
+                    System.out.println("Clicked at position: " + pos + ", element: " + elem.getName());
+                    Element targetDiv = findMessageDiv(elem);
+                    if (targetDiv != null) {
+                        Object styleAttr = targetDiv.getAttributes().getAttribute(javax.swing.text.html.HTML.Attribute.STYLE);
+                        Object idAttr = targetDiv.getAttributes().getAttribute(javax.swing.text.html.HTML.Attribute.ID);
+                        System.out.println("Found div with style: " + (styleAttr != null ? styleAttr : "none") + ", id: " + (idAttr != null ? idAttr : "none"));
+                        popupMenu.show(chatArea, e.getX(), e.getY());
+                    } else {
+                        System.out.println("No valid div found at position: " + pos);
+                        printElementTree(doc.getDefaultRootElement(), 0);
+                    }
+                }
+            }
+        });
+
         JScrollPane chatScrollPane = new JScrollPane(chatArea);
 
         JPanel inputPanel = new JPanel(new BorderLayout());
@@ -121,6 +176,77 @@ public class ChatFrame extends JFrame {
         add(mainPanel);
     }
 
+    private void printElementTree(Element elem, int level) {
+        String indent = "  ".repeat(level);
+        Object styleAttr = elem.getAttributes().getAttribute(javax.swing.text.html.HTML.Attribute.STYLE);
+        Object idAttr = elem.getAttributes().getAttribute(javax.swing.text.html.HTML.Attribute.ID);
+        System.out.println(indent + "Element: " + elem.getName() + ", Style: " + (styleAttr != null ? styleAttr : "none") + ", ID: " + (idAttr != null ? idAttr : "none"));
+        try {
+            int start = elem.getStartOffset();
+            int end = elem.getEndOffset();
+            String text = elem.getDocument().getText(start, end - start).trim();
+            if (!text.isEmpty()) {
+                System.out.println(indent + "  Text: " + text);
+            }
+        } catch (Exception e) {
+            System.out.println(indent + "  Text: [unreadable]");
+        }
+        for (int i = 0; i < elem.getElementCount(); i++) {
+            printElementTree(elem.getElement(i), level + 1);
+        }
+    }
+
+    private Element findMessageDiv(Element elem) {
+        if (elem == null) return null;
+
+        Stack<Element> stack = new Stack<>();
+        Set<Element> visited = new HashSet<>();
+        stack.push(elem);
+
+        while (!stack.isEmpty()) {
+            Element current = stack.pop();
+            if (visited.contains(current)) continue;
+            visited.add(current);
+
+            if (current.getName().equals("div")) {
+                Object idAttr = current.getAttributes().getAttribute(javax.swing.text.html.HTML.Attribute.ID);
+                Object styleAttr = current.getAttributes().getAttribute(javax.swing.text.html.HTML.Attribute.STYLE);
+                if (idAttr != null && idAttr.toString().startsWith("msg-")) {
+                    return current;
+                }
+                if (styleAttr != null && styleAttr.toString().contains("border-radius")) {
+                    return current;
+                }
+                if (styleAttr != null && styleAttr.toString().contains("text-align")) {
+                    for (int i = 0; i < current.getElementCount(); i++) {
+                        Element child = current.getElement(i);
+                        Object childId = child.getAttributes().getAttribute(javax.swing.text.html.HTML.Attribute.ID);
+                        Object childStyle = child.getAttributes().getAttribute(javax.swing.text.html.HTML.Attribute.STYLE);
+                        if (childId != null && childId.toString().startsWith("msg-")) {
+                            return child;
+                        }
+                        if (childStyle != null && childStyle.toString().contains("border-radius")) {
+                            return child;
+                        }
+                    }
+                }
+            }
+
+            // Handle p-implied
+            if (current.getName().equals("p-implied") && current.getParentElement() != null) {
+                stack.push(current.getParentElement());
+            }
+
+            for (int i = current.getElementCount() - 1; i >= 0; i--) {
+                stack.push(current.getElement(i));
+            }
+            if (current.getParentElement() != null) {
+                stack.push(current.getParentElement());
+            }
+        }
+        return null;
+    }
+
     private void styleButton(JButton button, Color bgColor) {
         button.setFocusPainted(false);
         button.setBackground(bgColor);
@@ -153,9 +279,11 @@ public class ChatFrame extends JFrame {
 
     private void clearChatArea() {
         chatArea.setText("<html><body style='font-family: Arial; font-size: 14px; padding: 10px;'></body></html>");
+        messages.clear();
+        messageCounter = 0;
     }
 
-    private void appendMessage(String sender, String message, boolean isSent, boolean isGroup) {
+    private void appendMessage(String sender, String message, boolean isSent, boolean isGroup, String timestamp) {
         message = message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#39;");
 
         String bubbleStyle = isSent ?
@@ -163,24 +291,128 @@ public class ChatFrame extends JFrame {
                 "background-color: #e9ecef; color: black; border-radius: 10px; padding: 8px 12px; margin: 5px; max-width: 60%; display: inline-block; text-align: left; box-shadow: 1px 1px 3px rgba(0,0,0,0.2);";
         String alignStyle = isSent ? "text-align: right;" : "text-align: left;";
         String senderName = isGroup && !isSent ? sender + ": " : "";
+        String messageId = "msg-" + messageCounter++;
         String html = String.format(
-                "<div style='%s'><div style='%s'>%s%s</div></div>",
-                alignStyle, bubbleStyle, senderName, message.replace("\n", "<br>")
+                "<div style='%s'><div id='%s' style='%s'>%s%s</div></div>",
+                alignStyle, messageId, bubbleStyle, senderName, message.replace("\n", "<br>")
         );
 
-        String currentContent = chatArea.getText();
-        if (!currentContent.contains("<body")) {
-            currentContent = "<html><body style='font-family: Arial; font-size: 14px; padding: 10px;'></body></html>";
+        HTMLDocument doc = (HTMLDocument) chatArea.getDocument();
+        HTMLEditorKit kit = (HTMLEditorKit) chatArea.getEditorKit();
+        try {
+            kit.insertHTML(doc, doc.getLength(), html, 0, 0, null);
+            System.out.println("Appended message: [" + timestamp + "] " + sender + ": " + message + ", ID: " + messageId);
+            printElementTree(doc.getDefaultRootElement(), 0);
+        } catch (Exception e) {
+            e.printStackTrace();
+            System.err.println("Failed to append message: " + message);
         }
-        String newContent = currentContent.replace("</body>", html + "</body>");
-        chatArea.setText(newContent);
-        System.out.println("Appended message: " + sender + ": " + message);
+
+        messages.add(new MessageInfo(timestamp, sender, message, currentReceiver, messageId));
 
         SwingUtilities.invokeLater(() -> {
             JScrollPane scrollPane = (JScrollPane) chatArea.getParent().getParent();
             JScrollBar vertical = scrollPane.getVerticalScrollBar();
             vertical.setValue(vertical.getMaximum());
         });
+    }
+
+    private void deleteMessage() {
+        int pos = chatArea.getCaretPosition();
+        HTMLDocument doc = (HTMLDocument) chatArea.getDocument();
+        Element elem = doc.getCharacterElement(pos);
+        Element targetDiv = findMessageDiv(elem);
+        if (targetDiv == null) {
+            JOptionPane.showMessageDialog(this, "Không thể xác định tin nhắn để xóa.",
+                    "Lỗi", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        Object idAttr = targetDiv.getAttributes().getAttribute(javax.swing.text.html.HTML.Attribute.ID);
+        String messageId = idAttr != null ? idAttr.toString() : null;
+        String elemText = getElementText(targetDiv);
+
+        MessageInfo messageToDelete = null;
+        for (MessageInfo msg : messages) {
+            String msgText = (msg.receiver.startsWith("GROUP_") && !msg.sender.equals(username) ? msg.sender + ": " : "") + msg.message;
+            if (msgText.equals(elemText) && msg.receiver.equals(currentReceiver) && (messageId == null || msg.messageId.equals(messageId))) {
+                messageToDelete = msg;
+                break;
+            }
+        }
+
+        if (messageToDelete == null) {
+            System.out.println("No MessageInfo found for text: " + elemText + ", ID: " + messageId);
+            JOptionPane.showMessageDialog(this, "Không tìm thấy tin nhắn để xóa.",
+                    "Lỗi", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        System.out.println("Attempting to delete: [" + messageToDelete.timestamp + "] " + messageToDelete.sender + ":" + messageToDelete.message);
+
+        String fileName = getChatFileName(messageToDelete.sender, messageToDelete.receiver);
+        String lineToDelete = "[" + messageToDelete.timestamp + "] " + messageToDelete.sender + ":" + messageToDelete.message;
+        File file = new File(fileName);
+        List<String> remainingLines = new ArrayList<>();
+        boolean found = false;
+        try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (!line.equals(lineToDelete)) {
+                    remainingLines.add(line);
+                } else {
+                    found = true;
+                    System.out.println("Found line in file: " + line);
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+            JOptionPane.showMessageDialog(this, "Lỗi khi đọc file lịch sử: " + e.getMessage(),
+                    "Lỗi", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        if (found) {
+            try (BufferedWriter writer = new BufferedWriter(new FileWriter(file))) {
+                for (String line : remainingLines) {
+                    writer.write(line);
+                    writer.newLine();
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+                JOptionPane.showMessageDialog(this, "Lỗi khi cập nhật file lịch sử: " + e.getMessage(),
+                        "Lỗi", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            messages.remove(messageToDelete);
+            try {
+                doc.removeElement(targetDiv.getParentElement());
+            } catch (Exception e) {
+                e.printStackTrace();
+                JOptionPane.showMessageDialog(this, "Lỗi khi xóa tin nhắn khỏi giao diện: " + e.getMessage(),
+                        "Lỗi", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            JOptionPane.showMessageDialog(this, "Đã xóa tin nhắn.",
+                    "Thành công", JOptionPane.INFORMATION_MESSAGE);
+        } else {
+            System.out.println("Line not found in file: " + lineToDelete);
+            JOptionPane.showMessageDialog(this, "Không tìm thấy tin nhắn trong file lịch sử.",
+                    "Lỗi", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private String getElementText(Element elem) {
+        try {
+            int start = elem.getStartOffset();
+            int end = elem.getEndOffset();
+            return chatArea.getDocument().getText(start, end - start).trim();
+        } catch (Exception e) {
+            e.printStackTrace();
+            return "";
+        }
     }
 
     private void connectToServer() {
@@ -209,16 +441,18 @@ public class ChatFrame extends JFrame {
                 } else if (message.startsWith("FILE:")) {
                     receiveFile(message);
                 } else if (message.startsWith("GROUP_CREATED:")) {
-                    appendMessage("Hệ thống", "Nhóm được tạo: " + message.substring("GROUP_CREATED:".length()), false, false);
+                    String timestamp = DATE_FORMAT.format(new Date());
+                    appendMessage("Hệ thống", "Nhóm được tạo: " + message.substring("GROUP_CREATED:".length()), false, false, timestamp);
                 } else if (message.startsWith("PRIVATE:")) {
                     String[] parts = message.split(":", 3);
                     if (parts.length == 3) {
                         String sender = parts[1];
                         String msg = parts[2];
-                        if (!sender.equals(username)) { // Bỏ qua tin nhắn từ chính mình
-                            saveMessageToFile(sender, username, msg);
+                        if (!sender.equals(username)) {
+                            String timestamp = DATE_FORMAT.format(new Date());
+                            saveMessageToFile(sender, username, msg, timestamp);
                             if (currentReceiver != null && currentReceiver.equals(sender)) {
-                                appendMessage(sender, msg, false, false);
+                                appendMessage(sender, msg, false, false, timestamp);
                             }
                         }
                     }
@@ -228,9 +462,10 @@ public class ChatFrame extends JFrame {
                         String groupName = parts[1];
                         String sender = parts[2];
                         String msg = parts[3];
-                        saveMessageToFile(sender, groupName, msg);
+                        String timestamp = DATE_FORMAT.format(new Date());
+                        saveMessageToFile(sender, groupName, msg, timestamp);
                         if (currentReceiver != null && currentReceiver.equals(groupName)) {
-                            appendMessage(sender, msg, sender.equals(username), true);
+                            appendMessage(sender, msg, sender.equals(username), true, timestamp);
                         }
                     }
                 }
@@ -265,13 +500,14 @@ public class ChatFrame extends JFrame {
     private void sendMessage(ActionEvent e) {
         String message = messageField.getText().trim();
         if (!message.isEmpty() && currentReceiver != null && !currentReceiver.startsWith("--")) {
+            String timestamp = DATE_FORMAT.format(new Date());
             if (currentReceiver.startsWith("GROUP_")) {
                 out.println("GROUP:" + currentReceiver + ":" + message);
-                saveMessageToFile(username, currentReceiver, message);
+                saveMessageToFile(username, currentReceiver, message, timestamp);
             } else {
                 out.println("PRIVATE:" + currentReceiver + ":" + message);
-                appendMessage(username, message, true, false);
-                saveMessageToFile(username, currentReceiver, message);
+                appendMessage(username, message, true, false, timestamp);
+                saveMessageToFile(username, currentReceiver, message, timestamp);
             }
             messageField.setText("");
         } else {
@@ -280,7 +516,7 @@ public class ChatFrame extends JFrame {
         }
     }
 
-    private void saveMessageToFile(String sender, String receiver, String message) {
+    private void saveMessageToFile(String sender, String receiver, String message, String timestamp) {
         try {
             String fileName = getChatFileName(sender, receiver);
             File file = new File(fileName);
@@ -288,7 +524,7 @@ public class ChatFrame extends JFrame {
             if (!parentDir.exists()) {
                 parentDir.mkdirs();
             }
-            String formattedMessage = "[" + DATE_FORMAT.format(new Date()) + "] " + sender + ":" + message;
+            String formattedMessage = "[" + timestamp + "] " + sender + ":" + message;
             try (BufferedWriter writer = new BufferedWriter(new FileWriter(fileName, true))) {
                 writer.write(formattedMessage);
                 writer.newLine();
@@ -314,16 +550,19 @@ public class ChatFrame extends JFrame {
             new Thread(() -> {
                 try {
                     out.println("FILE:" + currentReceiver + ":" + file.getName());
+                    out.flush();
                     FileInputStream fis = new FileInputStream(file);
                     OutputStream os = socket.getOutputStream();
-                    byte[] buffer = new byte[1024];
+                    byte[] buffer = new byte[4096];
                     int bytesRead;
                     while ((bytesRead = fis.read(buffer)) != -1) {
                         os.write(buffer, 0, bytesRead);
                     }
                     fis.close();
-                    appendMessage(username, "Đã gửi file: " + file.getName(), true, false);
-                    saveMessageToFile(username, currentReceiver, "File: " + file.getName());
+                    os.flush();
+                    String timestamp = DATE_FORMAT.format(new Date());
+                    appendMessage(username, "Đã gửi file: " + file.getName(), true, false, timestamp);
+                    saveMessageToFile(username, currentReceiver, "File: " + file.getName(), timestamp);
                 } catch (IOException ex) {
                     JOptionPane.showMessageDialog(this, "Lỗi khi gửi file: " + ex.getMessage(),
                             "Lỗi", JOptionPane.ERROR_MESSAGE);
@@ -351,15 +590,16 @@ public class ChatFrame extends JFrame {
                             try {
                                 FileOutputStream fos = new FileOutputStream(file);
                                 InputStream is = socket.getInputStream();
-                                byte[] buffer = new byte[1024];
+                                byte[] buffer = new byte[4096];
                                 int bytesRead;
                                 while ((bytesRead = is.read(buffer)) > 0) {
                                     fos.write(buffer, 0, bytesRead);
                                     if (is.available() == 0) break;
                                 }
                                 fos.close();
-                                appendMessage(sender, "Đã nhận file: " + fileName, false, false);
-                                saveMessageToFile(sender, username, "File: " + fileName);
+                                String timestamp = DATE_FORMAT.format(new Date());
+                                appendMessage(sender, "Đã nhận file: " + fileName, false, false, timestamp);
+                                saveMessageToFile(sender, username, "File: " + fileName, timestamp);
                             } catch (IOException ex) {
                                 JOptionPane.showMessageDialog(this, "Lỗi khi nhận file: " + ex.getMessage(),
                                         "Lỗi", JOptionPane.ERROR_MESSAGE);
@@ -381,10 +621,12 @@ public class ChatFrame extends JFrame {
         JTextField groupNameField = new JTextField(20);
         JList<String> memberList = new JList<>(onlineUsersModel);
         memberList.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.add(new JLabel("Tên nhóm:"), BorderLayout.NORTH);
-        panel.add(groupNameField, BorderLayout.CENTER);
-        panel.add(new JScrollPane(memberList), BorderLayout.SOUTH);
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.add(new JLabel("Tên nhóm:"));
+        panel.add(groupNameField);
+        panel.add(new JLabel("Chọn thành viên:"));
+        panel.add(new JScrollPane(memberList));
 
         int result = JOptionPane.showConfirmDialog(this, panel, "Tạo nhóm", JOptionPane.OK_CANCEL_OPTION);
         if (result == JOptionPane.OK_OPTION) {
@@ -417,7 +659,7 @@ public class ChatFrame extends JFrame {
             String filePath = getChatFileName(username, currentReceiver);
             System.out.println("Loading history from: " + filePath);
             File file = new File(filePath);
-            Set<String> displayedMessages = new HashSet<>(); // Ngăn lặp tin nhắn
+            Set<String> displayedMessages = new HashSet<>();
             if (file.exists()) {
                 try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
                     String line;
@@ -427,13 +669,14 @@ public class ChatFrame extends JFrame {
                                 if (line.startsWith("[")) {
                                     int timestampEnd = line.indexOf(']');
                                     if (timestampEnd != -1) {
+                                        String timestamp = line.substring(1, timestampEnd);
                                         int senderEnd = line.indexOf(':', timestampEnd);
                                         if (senderEnd != -1) {
                                             String sender = line.substring(timestampEnd + 2, senderEnd).trim();
                                             String message = line.substring(senderEnd + 1).trim();
                                             boolean isSent = sender.equals(username);
                                             boolean isGroup = currentReceiver.startsWith("GROUP_");
-                                            appendMessage(sender, message, isSent, isGroup);
+                                            appendMessage(sender, message, isSent, isGroup, timestamp);
                                             displayedMessages.add(line);
                                             System.out.println("Loaded: " + line);
                                         }
