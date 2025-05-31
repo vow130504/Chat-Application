@@ -6,7 +6,7 @@ import java.awt.*;
 public class ChatApplication {
     public static void main(String[] args) {
         try {
-            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+            UIManager.setLookAndFeel("com.formdev.flatlaf.FlatLightLaf");
         } catch (Exception e) {
             e.printStackTrace();
         }
