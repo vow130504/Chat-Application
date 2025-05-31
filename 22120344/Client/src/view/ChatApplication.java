@@ -1,8 +1,5 @@
 package Client.src.view;
 
-
-
-import Client.src.view.DatabaseInfoUI;
 import javax.swing.*;
 import java.awt.*;
 

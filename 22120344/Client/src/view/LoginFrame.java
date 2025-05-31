@@ -1,8 +1,6 @@
 package Client.src.view;
 
 import Client.src.Controller.DatabaseConnection;
-import Client.src.view.ChatApplication;
-
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
@@ -19,7 +17,7 @@ public class LoginFrame extends JFrame {
     }
 
     private void initUI() {
-        setTitle("Login");
+        setTitle("Đăng nhập");
         setSize(400, 300);
         setDefaultCloseOperation(EXIT_ON_CLOSE);
 
@@ -33,16 +31,16 @@ public class LoginFrame extends JFrame {
         passwordField = new JPasswordField();
         passwordField.setPreferredSize(new Dimension(200, 30));
 
-        mainPanel.add(createLabeledField("Username:", usernameField));
+        mainPanel.add(createLabeledField("Tên người dùng:", usernameField));
         mainPanel.add(Box.createVerticalStrut(10));
-        mainPanel.add(createLabeledField("Password:", passwordField));
+        mainPanel.add(createLabeledField("Mật khẩu:", passwordField));
         mainPanel.add(Box.createVerticalStrut(20));
 
-        JButton loginButton = new JButton("Login");
+        JButton loginButton = new JButton("Đăng nhập");
         styleButton(loginButton, new Color(70, 130, 180));
         loginButton.addActionListener(this::login);
 
-        JButton registerButton = new JButton("Register");
+        JButton registerButton = new JButton("Đăng ký");
         styleButton(registerButton, new Color(100, 100, 100));
         registerButton.addActionListener(this::register);
 
@@ -81,44 +79,35 @@ public class LoginFrame extends JFrame {
         String username = usernameField.getText().trim();
         String password = new String(passwordField.getPassword());
 
-        System.out.println("Attempting login with username: " + username); // Thêm dòng này
-
         if (username.isEmpty() || password.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Please fill in all fields.",
-                    "Error", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(this, "Vui lòng điền đầy đủ các trường.",
+                    "Lỗi", JOptionPane.ERROR_MESSAGE);
             return;
         }
 
         try (Connection conn = DatabaseConnection.getConnection()) {
-            System.out.println("Database connection established"); // Thêm dòng này
-
             try (PreparedStatement stmt = conn.prepareStatement(
                     "SELECT * FROM users WHERE username = ? AND password = ?")) {
 
                 stmt.setString(1, username);
                 stmt.setString(2, password);
-                System.out.println("Executing query: " + stmt.toString()); // Thêm dòng này
-
                 ResultSet rs = stmt.executeQuery();
 
                 if (rs.next()) {
-                    System.out.println("User found in database"); // Thêm dòng này
                     updateOnlineStatus(username, true);
-                    JOptionPane.showMessageDialog(this, "Login successful!",
-                            "Success", JOptionPane.INFORMATION_MESSAGE);
+                    JOptionPane.showMessageDialog(this, "Đăng nhập thành công!",
+                            "Thành công", JOptionPane.INFORMATION_MESSAGE);
                     openChatFrame(username);
                     dispose();
                 } else {
-                    System.out.println("No matching user found"); // Thêm dòng này
-                    JOptionPane.showMessageDialog(this, "Invalid username or password.",
-                            "Error", JOptionPane.ERROR_MESSAGE);
+                    JOptionPane.showMessageDialog(this, "Tên người dùng hoặc mật khẩu không đúng.",
+                            "Lỗi", JOptionPane.ERROR_MESSAGE);
                 }
             }
         } catch (SQLException ex) {
-            System.err.println("SQL Error during login: " + ex.getMessage()); // Thêm dòng này
+            JOptionPane.showMessageDialog(this, "Lỗi kết nối cơ sở dữ liệu:\n" + ex.getMessage(),
+                    "Lỗi", JOptionPane.ERROR_MESSAGE);
             ex.printStackTrace();
-            JOptionPane.showMessageDialog(this, "Database connection error:\n" + ex.getMessage(),
-                    "Error", JOptionPane.ERROR_MESSAGE);
         }
     }
 
@@ -127,40 +116,39 @@ public class LoginFrame extends JFrame {
         String password = new String(passwordField.getPassword());
 
         if (username.isEmpty() || password.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Please fill in all fields.",
-                    "Error", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(this, "Vui lòng điền đầy đủ các trường.",
+                    "Lỗi", JOptionPane.ERROR_MESSAGE);
             return;
         }
 
         try (Connection conn = DatabaseConnection.getConnection()) {
-            // Check if username exists
             try (PreparedStatement checkStmt = conn.prepareStatement(
                     "SELECT username FROM users WHERE username = ?")) {
                 checkStmt.setString(1, username);
                 ResultSet rs = checkStmt.executeQuery();
                 if (rs.next()) {
-                    JOptionPane.showMessageDialog(this, "Username already exists.",
-                            "Error", JOptionPane.ERROR_MESSAGE);
+                    JOptionPane.showMessageDialog(this, "Tên người dùng đã tồn tại.",
+                            "Lỗi", JOptionPane.ERROR_MESSAGE);
                     return;
                 }
             }
 
-            // Add new user
             try (PreparedStatement stmt = conn.prepareStatement(
                     "INSERT INTO users (username, password, is_online) VALUES (?, ?, ?)")) {
                 stmt.setString(1, username);
                 stmt.setString(2, password);
                 stmt.setBoolean(3, false);
                 stmt.executeUpdate();
-                JOptionPane.showMessageDialog(this, "Registration successful! Please login.",
-                        "Success", JOptionPane.INFORMATION_MESSAGE);
+                JOptionPane.showMessageDialog(this, "Đăng ký thành công! Vui lòng đăng nhập.",
+                        "Thành công", JOptionPane.INFORMATION_MESSAGE);
             }
         } catch (SQLException ex) {
-            JOptionPane.showMessageDialog(this, "Registration error:\n" + ex.getMessage(),
-                    "Error", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(this, "Lỗi đăng ký:\n" + ex.getMessage(),
+                    "Lỗi", JOptionPane.ERROR_MESSAGE);
             ex.printStackTrace();
         }
     }
+
     private void updateOnlineStatus(String username, boolean status) {
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement stmt = conn.prepareStatement(
@@ -169,7 +157,7 @@ public class LoginFrame extends JFrame {
             stmt.setString(2, username);
             stmt.executeUpdate();
         } catch (SQLException ex) {
-            System.err.println("Error updating online status: " + ex.getMessage());
+            System.err.println("Lỗi cập nhật trạng thái online: " + ex.getMessage());
             ex.printStackTrace();
         }
     }

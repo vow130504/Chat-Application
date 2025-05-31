@@ -1,8 +1,6 @@
 package Client.src.view;
 
 import Client.src.Controller.DatabaseConnection;
-import Client.src.view.ChatApplication;
-
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
@@ -88,7 +86,7 @@ public class DatabaseInfoUI extends JFrame {
         String password = new String(passwordField.getPassword());
 
         if (dbName.isEmpty() || host.isEmpty() || user.isEmpty()) {
-            showError("Please fill in all required fields.");
+            showError("Vui lòng điền đầy đủ các trường bắt buộc.");
             return;
         }
 
@@ -97,15 +95,15 @@ public class DatabaseInfoUI extends JFrame {
         try {
             DatabaseConnection.connect(url, user, password);
             if (DatabaseConnection.testConnection()) {
-                JOptionPane.showMessageDialog(this, "Database connection successful!",
-                        "Success", JOptionPane.INFORMATION_MESSAGE);
+                JOptionPane.showMessageDialog(this, "Kết nối cơ sở dữ liệu thành công!",
+                        "Thành công", JOptionPane.INFORMATION_MESSAGE);
                 openLoginScreen();
                 dispose();
             } else {
-                showError("Failed to establish database connection.");
+                showError("Không thể thiết lập kết nối cơ sở dữ liệu.");
             }
         } catch (SQLException ex) {
-            showError("Database connection error:\n" + ex.getMessage());
+            showError("Lỗi kết nối cơ sở dữ liệu:\n" + ex.getMessage());
             ex.printStackTrace();
         }
     }
@@ -121,7 +119,7 @@ public class DatabaseInfoUI extends JFrame {
 
     private void showError(String message) {
         JOptionPane.showMessageDialog(this, message,
-                "Error", JOptionPane.ERROR_MESSAGE);
+                "Lỗi", JOptionPane.ERROR_MESSAGE);
     }
 
     private void openLoginScreen() {

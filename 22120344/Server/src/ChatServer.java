@@ -13,7 +13,6 @@ public class ChatServer {
     private static ServerSocket serverSocket;
 
     public static void main(String[] args) {
-        // Initialize database connection
         try {
             DatabaseConnection.connect(
                     "jdbc:mysql://localhost:3306/chat_db?useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC",
@@ -57,7 +56,6 @@ public class ChatServer {
             try (Connection conn = DatabaseConnection.getConnection();
                  PreparedStatement stmt = conn.prepareStatement(
                          "UPDATE users SET is_online = ? WHERE username = ?")) {
-
                 stmt.setBoolean(1, status);
                 stmt.setString(2, username);
                 stmt.executeUpdate();
@@ -69,17 +67,14 @@ public class ChatServer {
                 out = new PrintWriter(socket.getOutputStream(), true);
                 in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 
-                // Get username
                 username = in.readLine();
                 if (username == null) return;
 
-                // Validate username
                 if (!isUsernameValid(username)) {
-                    out.println("ERROR: Invalid username");
+                    out.println("ERROR: Tên người dùng không hợp lệ");
                     return;
                 }
 
-                // Add to clients map
                 clients.put(username, this);
                 try {
                     updateOnlineStatus(username, true);
@@ -87,11 +82,9 @@ public class ChatServer {
                     System.err.println("Error updating online status: " + e.getMessage());
                     return;
                 }
-                broadcast("SERVER: " + username + " has joined the chat", username);
-                sendOnlineUsers();
+                broadcast("SERVER: " + username + " đã tham gia chat", username);
+                sendOnlineUsersAndGroups();
 
-
-                // Handle messages
                 String message;
                 while ((message = in.readLine()) != null) {
                     if (message.startsWith("PRIVATE:")) {
@@ -100,13 +93,15 @@ public class ChatServer {
                         handleGroupMessage(message);
                     } else if (message.startsWith("FILE:")) {
                         handleFileTransfer(message);
+                    } else if (message.startsWith("CREATE_GROUP:")) {
+                        handleCreateGroup(message);
                     } else {
                         broadcast(username + ": " + message, username);
-                        saveMessage(username, "ALL", message);
+                        saveMessage(username, "ALL", "TEXT", message, null);
                     }
                 }
             } catch (IOException e) {
-                System.err.println("Error with client " + username + ": " + e.getMessage());
+                System.err.println("Lỗi với client " + username + ": " + e.getMessage());
             } finally {
                 if (username != null) {
                     clients.remove(username);
@@ -115,8 +110,8 @@ public class ChatServer {
                     } catch (SQLException e) {
                         e.printStackTrace();
                     }
-                    broadcast("SERVER: " + username + " has left the chat", username);
-                    sendOnlineUsers();
+                    broadcast("SERVER: " + username + " đã rời chat", username);
+                    sendOnlineUsersAndGroups();
                 }
                 try {
                     socket.close();
@@ -134,7 +129,7 @@ public class ChatServer {
                 ResultSet rs = stmt.executeQuery();
                 return rs.next();
             } catch (SQLException e) {
-                out.println("ERROR: Database error");
+                out.println("ERROR: Lỗi cơ sở dữ liệu");
                 e.printStackTrace();
                 return false;
             }
@@ -149,9 +144,9 @@ public class ChatServer {
                 ClientHandler receiverHandler = clients.get(receiver);
                 if (receiverHandler != null) {
                     receiverHandler.sendMessage("PRIVATE:" + username + ":" + msg);
-                    saveMessage(username, receiver, msg);
+                    saveMessage(username, receiver, "TEXT", msg, null);
                 } else {
-                    sendMessage("ERROR: User " + receiver + " is offline");
+                    sendMessage("ERROR: Người dùng " + receiver + " đang offline");
                 }
             }
         }
@@ -164,27 +159,23 @@ public class ChatServer {
 
                 try (Connection conn = DatabaseConnection.getConnection();
                      PreparedStatement stmt = conn.prepareStatement(
-                             "SELECT members FROM chat_groups WHERE group_name = ?")) {
-
+                             "SELECT username FROM group_members gm JOIN chat_groups cg ON gm.group_id = cg.group_id " +
+                                     "WHERE cg.group_name = ?")) {
                     stmt.setString(1, groupName);
                     ResultSet rs = stmt.executeQuery();
 
-                    if (rs.next()) {
-                        String[] members = rs.getString("members").split(",");
-                        for (String member : members) {
-                            member = member.trim();
-                            if (!member.equals(username)) {
-                                ClientHandler memberHandler = clients.get(member);
-                                if (memberHandler != null) {
-                                    memberHandler.sendMessage("GROUP:" + groupName + ":" + username + ":" + msg);
-                                }
+                    while (rs.next()) {
+                        String member = rs.getString("username").trim();
+                        if (!member.equals(username)) {
+                            ClientHandler memberHandler = clients.get(member);
+                            if (memberHandler != null) {
+                                memberHandler.sendMessage("GROUP:" + groupName + ":" + username + ":" + msg);
                             }
                         }
-                        saveMessage(username, groupName, msg);
-                    } else {
-                        sendMessage("ERROR: Group " + groupName + " doesn't exist");
                     }
+                    saveMessage(username, groupName, "TEXT", msg, null);
                 } catch (SQLException e) {
+                    sendMessage("ERROR: Nhóm " + groupName + " không tồn tại");
                     e.printStackTrace();
                 }
             }
@@ -199,21 +190,61 @@ public class ChatServer {
                 ClientHandler receiverHandler = clients.get(receiver);
                 if (receiverHandler != null) {
                     receiverHandler.sendMessage("FILE:" + username + ":" + fileName);
+                    String filePath = "server_files/" + fileName;
+                    saveMessage(username, receiver, "FILE", "Sent file: " + fileName, filePath);
                     // File content will be sent directly through the socket
                 } else {
-                    sendMessage("ERROR: User " + receiver + " is offline");
+                    sendMessage("ERROR: Người dùng " + receiver + " đang offline");
                 }
             }
         }
 
-        private void saveMessage(String sender, String receiver, String message) {
+        private void handleCreateGroup(String message) {
+            String[] parts = message.split(":", 3);
+            if (parts.length == 3) {
+                String groupName = parts[1];
+                String[] members = parts[2].split(",");
+
+                try (Connection conn = DatabaseConnection.getConnection()) {
+                    PreparedStatement stmt = conn.prepareStatement(
+                            "INSERT INTO chat_groups (group_name, creator) VALUES (?, ?)",
+                            Statement.RETURN_GENERATED_KEYS);
+                    stmt.setString(1, groupName);
+                    stmt.setString(2, username);
+                    stmt.executeUpdate();
+
+                    ResultSet rs = stmt.getGeneratedKeys();
+                    int groupId = 0;
+                    if (rs.next()) {
+                        groupId = rs.getInt(1);
+                    }
+
+                    PreparedStatement memberStmt = conn.prepareStatement(
+                            "INSERT INTO group_members (group_id, username) VALUES (?, ?)");
+                    for (String member : members) {
+                        memberStmt.setInt(1, groupId);
+                        memberStmt.setString(2, member.trim());
+                        memberStmt.executeUpdate();
+                    }
+
+                    broadcast("GROUP_CREATED:" + groupName, null);
+                    sendOnlineUsersAndGroups();
+                } catch (SQLException e) {
+                    sendMessage("ERROR: Lỗi khi tạo nhóm");
+                    e.printStackTrace();
+                }
+            }
+        }
+
+        private void saveMessage(String sender, String receiver, String messageType, String messageContent, String filePath) {
             try (Connection conn = DatabaseConnection.getConnection();
                  PreparedStatement stmt = conn.prepareStatement(
-                         "INSERT INTO messages (sender, receiver, message) VALUES (?, ?, ?)")) {
-
+                         "INSERT INTO messages (sender, receiver, message_type, message_content, file_path) VALUES (?, ?, ?, ?, ?)")) {
                 stmt.setString(1, sender);
                 stmt.setString(2, receiver);
-                stmt.setString(3, message);
+                stmt.setString(3, messageType);
+                stmt.setString(4, messageContent);
+                stmt.setString(5, filePath);
                 stmt.executeUpdate();
             } catch (SQLException e) {
                 e.printStackTrace();
@@ -233,11 +264,24 @@ public class ChatServer {
         }
     }
 
-    public static void sendOnlineUsers() {
-        StringBuilder onlineUsers = new StringBuilder("ONLINE_USERS:");
+    public static void sendOnlineUsersAndGroups() {
+        StringBuilder onlineUsers = new StringBuilder();
         for (String user : clients.keySet()) {
             onlineUsers.append(user).append(",");
         }
-        broadcast(onlineUsers.toString(), null);
+
+        StringBuilder groups = new StringBuilder();
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement stmt = conn.prepareStatement("SELECT group_name FROM chat_groups")) {
+            ResultSet rs = stmt.executeQuery();
+            while (rs.next()) {
+                groups.append(rs.getString("group_name")).append(",");
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+
+        String message = "ONLINE_USERS_AND_GROUPS:" + onlineUsers + ";" + groups;
+        broadcast(message, null);
     }
 }
