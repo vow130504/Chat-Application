@@ -1,17 +1,21 @@
 package Client.src.view;
 
-import Client.src.Controller.DatabaseConnection;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
-import java.sql.*;
+import java.io.*;
+import java.text.SimpleDateFormat;
+import java.util.*;
+import java.util.List;
 
 public class HistoryDialog extends JDialog {
     private JTable historyTable;
     private JButton deleteButton;
     private DefaultTableModel tableModel;
     private String username;
+    private static final String HISTORY_DIR = "chat_history";
+    private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
 
     public HistoryDialog(JFrame parent, String username) {
         super(parent, "Lịch sử chat - " + username, true);
@@ -28,7 +32,7 @@ public class HistoryDialog extends JDialog {
         JPanel mainPanel = new JPanel(new BorderLayout());
         mainPanel.setBorder(new EmptyBorder(10, 10, 10, 10));
 
-        String[] columns = {"ID", "Thời gian", "Người gửi", "Người nhận", "Loại", "Nội dung", "File"};
+        String[] columns = {"Thời gian", "Người gửi", "Người nhận", "Nội dung"};
         tableModel = new DefaultTableModel(columns, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -51,35 +55,51 @@ public class HistoryDialog extends JDialog {
         add(mainPanel);
     }
 
+    private String getChatFileName(String sender, String receiver) {
+        if (receiver.startsWith("GROUP_")) {
+            return HISTORY_DIR + "/" + receiver + ".txt";
+        }
+        String[] names = new String[]{sender, receiver};
+        Arrays.sort(names);
+        return HISTORY_DIR + "/" + names[0] + "_" + names[1] + ".txt";
+    }
+
     private void loadHistory() {
         tableModel.setRowCount(0);
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(
-                     "SELECT id, sender, receiver, message_type, message_content, file_path, timestamp " +
-                             "FROM messages WHERE receiver = ? OR sender = ? OR receiver IN " +
-                             "(SELECT group_name FROM chat_groups cg JOIN group_members gm ON cg.group_id = gm.group_id " +
-                             "WHERE gm.username = ?) ORDER BY timestamp DESC")) {
-
-            stmt.setString(1, username);
-            stmt.setString(2, username);
-            stmt.setString(3, username);
-            ResultSet rs = stmt.executeQuery();
-
-            while (rs.next()) {
-                tableModel.addRow(new Object[]{
-                        rs.getInt("id"),
-                        rs.getTimestamp("timestamp"),
-                        rs.getString("sender"),
-                        rs.getString("receiver"),
-                        rs.getString("message_type"),
-                        rs.getString("message_content"),
-                        rs.getString("file_path") != null ? rs.getString("file_path") : ""
-                });
+        File historyDir = new File(HISTORY_DIR);
+        if (historyDir.exists()) {
+            File[] files = historyDir.listFiles((dir, name) -> name.endsWith(".txt"));
+            if (files != null) {
+                for (File file : files) {
+                    String fileName = file.getName().replace(".txt", "");
+                    String receiver = null;
+                    boolean isGroup = fileName.startsWith("GROUP_");
+                    if (isGroup) {
+                        receiver = fileName;
+                    } else {
+                        String[] users = fileName.split("_");
+                        if (users.length == 2 && (users[0].equals(username) || users[1].equals(username))) {
+                            receiver = users[0].equals(username) ? users[1] : users[0];
+                        }
+                    }
+                    if (receiver != null) {
+                        try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+                            String line;
+                            while ((line = reader.readLine()) != null) {
+                                String[] parts = line.split(" ", 3);
+                                if (parts.length >= 3) {
+                                    String timestamp = parts[0].substring(1) + " " + parts[1];
+                                    String sender = parts[2].split(":")[0];
+                                    String message = parts[2].substring(parts[2].indexOf(":") + 1);
+                                    tableModel.addRow(new Object[]{timestamp, sender, receiver, message});
+                                }
+                            }
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                }
             }
-        } catch (SQLException ex) {
-            ex.printStackTrace();
-            JOptionPane.showMessageDialog(this, "Lỗi khi tải lịch sử: " + ex.getMessage(),
-                    "Lỗi", JOptionPane.ERROR_MESSAGE);
         }
     }
 
@@ -91,20 +111,45 @@ public class HistoryDialog extends JDialog {
             return;
         }
 
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement stmt = conn.prepareStatement("DELETE FROM messages WHERE id = ?")) {
-            for (int row : selectedRows) {
-                int messageId = (int) tableModel.getValueAt(row, 0);
-                stmt.setInt(1, messageId);
-                stmt.executeUpdate();
-            }
-            JOptionPane.showMessageDialog(this, "Đã xóa các tin nhắn đã chọn.",
-                    "Thành công", JOptionPane.INFORMATION_MESSAGE);
-            loadHistory();
-        } catch (SQLException ex) {
-            JOptionPane.showMessageDialog(this, "Lỗi khi xóa tin nhắn: " + ex.getMessage(),
-                    "Lỗi", JOptionPane.ERROR_MESSAGE);
-            ex.printStackTrace();
+        Map<String, List<String>> messagesByFile = new HashMap<>();
+        for (int row : selectedRows) {
+            String sender = (String) tableModel.getValueAt(row, 1);
+            String receiver = (String) tableModel.getValueAt(row, 2);
+            String timestamp = (String) tableModel.getValueAt(row, 0);
+            String message = (String) tableModel.getValueAt(row, 3);
+            String fileName = getChatFileName(sender, receiver);
+            String line = "[" + timestamp + "] " + sender + ":" + message;
+            messagesByFile.computeIfAbsent(fileName, k -> new ArrayList<>()).add(line);
         }
+
+        for (Map.Entry<String, List<String>> entry : messagesByFile.entrySet()) {
+            String fileName = entry.getKey();
+            List<String> messagesToDelete = entry.getValue();
+            File file = new File(fileName);
+            List<String> remainingLines = new ArrayList<>();
+            try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (!messagesToDelete.contains(line)) {
+                        remainingLines.add(line);
+                    }
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+
+            try (BufferedWriter writer = new BufferedWriter(new FileWriter(file))) {
+                for (String line : remainingLines) {
+                    writer.write(line);
+                    writer.newLine();
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+
+        JOptionPane.showMessageDialog(this, "Đã xóa các tin nhắn đã chọn.",
+                "Thành công", JOptionPane.INFORMATION_MESSAGE);
+        loadHistory();
     }
 }

@@ -4,16 +4,24 @@ import Server.src.Controller.DatabaseConnection;
 import java.io.*;
 import java.net.*;
 import java.sql.*;
+import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.Date;
 import java.util.concurrent.*;
 
 public class ChatServer {
     private static final int PORT = 8080;
     private static final Map<String, ClientHandler> clients = new ConcurrentHashMap<>();
     private static ServerSocket serverSocket;
+    private static final String HISTORY_DIR = "server_files/chat_history";
+    private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
 
     public static void main(String[] args) {
         try {
+            File dir = new File(HISTORY_DIR);
+            if (!dir.exists()) {
+                dir.mkdirs();
+            }
             DatabaseConnection.connect(
                     "jdbc:mysql://localhost:3306/chat_db?useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC",
                     "root", "Nmt2004.");
@@ -39,6 +47,34 @@ public class ChatServer {
             } catch (IOException e) {
                 e.printStackTrace();
             }
+        }
+    }
+
+    private static String getChatFileName(String sender, String receiver) {
+        if (receiver.startsWith("GROUP_")) {
+            return HISTORY_DIR + "/" + receiver + ".txt";
+        }
+        String[] names = new String[]{sender, receiver};
+        Arrays.sort(names);
+        return HISTORY_DIR + "/" + names[0] + "_" + names[1] + ".txt";
+    }
+
+    private static void saveMessageToFile(String sender, String receiver, String messageContent, String filePath) {
+        try {
+            String fileName = getChatFileName(sender, receiver);
+            File file = new File(fileName);
+            File parentDir = file.getParentFile();
+            if (!parentDir.exists()) {
+                parentDir.mkdirs();
+            }
+            String message = "[" + DATE_FORMAT.format(new Date()) + "] " + sender + ":" +
+                    (filePath != null ? " File: " + new File(filePath).getName() : messageContent);
+            try (BufferedWriter writer = new BufferedWriter(new FileWriter(fileName, true))) {
+                writer.write(message);
+                writer.newLine();
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
         }
     }
 
@@ -96,7 +132,6 @@ public class ChatServer {
                     } else if (message.startsWith("CREATE_GROUP:")) {
                         handleCreateGroup(message);
                     } else {
-                        // Không gửi tin nhắn chung nữa
                         sendMessage("ERROR: Vui lòng chọn người nhận hoặc nhóm để gửi tin nhắn.");
                     }
                 }
@@ -144,8 +179,8 @@ public class ChatServer {
                 ClientHandler receiverHandler = clients.get(receiver);
                 if (receiverHandler != null) {
                     receiverHandler.sendMessage("PRIVATE:" + username + ":" + msg);
-                    saveMessage(username, receiver, "TEXT", msg, null);
-                    sendMessage("PRIVATE:" + username + ":" + msg); // Gửi lại cho người gửi
+                    saveMessageToFile(username, receiver, msg, null);
+                    sendMessage("PRIVATE:" + username + ":" + msg);
                 } else {
                     sendMessage("ERROR: Người dùng " + receiver + " đang offline");
                 }
@@ -167,12 +202,15 @@ public class ChatServer {
 
                     while (rs.next()) {
                         String member = rs.getString("username").trim();
-                        ClientHandler memberHandler = clients.get(member);
-                        if (memberHandler != null) {
-                            memberHandler.sendMessage("GROUP:" + groupName + ":" + username + ":" + msg);
+                        if (!member.equals(username)) { // Không gửi lại cho người gửi
+                            ClientHandler memberHandler = clients.get(member);
+                            if (memberHandler != null) {
+                                memberHandler.sendMessage("GROUP:" + groupName + ":" + username + ":" + msg);
+                            }
                         }
                     }
-                    saveMessage(username, groupName, "TEXT", msg, null);
+                    saveMessageToFile(username, groupName, msg, null);
+                    sendMessage("GROUP:" + groupName + ":" + username + ":" + msg); // Gửi lại cho người gửi
                 } catch (SQLException e) {
                     sendMessage("ERROR: Nhóm " + groupName + " không tồn tại");
                     e.printStackTrace();
@@ -190,7 +228,7 @@ public class ChatServer {
                 if (receiverHandler != null) {
                     receiverHandler.sendMessage("FILE:" + username + ":" + fileName);
                     String filePath = "server_files/" + fileName;
-                    saveMessage(username, receiver, "FILE", "Sent file: " + fileName, filePath);
+                    saveMessageToFile(username, receiver, null, filePath);
                 } else {
                     sendMessage("ERROR: Người dùng " + receiver + " đang offline");
                 }
@@ -231,21 +269,6 @@ public class ChatServer {
                     sendMessage("ERROR: Lỗi khi tạo nhóm");
                     e.printStackTrace();
                 }
-            }
-        }
-
-        private void saveMessage(String sender, String receiver, String messageType, String messageContent, String filePath) {
-            try (Connection conn = DatabaseConnection.getConnection();
-                 PreparedStatement stmt = conn.prepareStatement(
-                         "INSERT INTO messages (sender, receiver, message_type, message_content, file_path) VALUES (?, ?, ?, ?, ?)")) {
-                stmt.setString(1, sender);
-                stmt.setString(2, receiver);
-                stmt.setString(3, messageType);
-                stmt.setString(4, messageContent);
-                stmt.setString(5, filePath);
-                stmt.executeUpdate();
-            } catch (SQLException e) {
-                e.printStackTrace();
             }
         }
 

@@ -8,7 +8,7 @@ import java.awt.*;
 import java.awt.event.*;
 import java.io.*;
 import java.net.*;
-import java.sql.*;
+import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.List;
 
@@ -25,6 +25,9 @@ public class ChatFrame extends JFrame {
     private DefaultListModel<String> onlineUsersModel;
     private JLabel receiverLabel;
 
+    private static final String HISTORY_DIR = "chat_history";
+    private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+
     public ChatFrame(String username) {
         this.username = username;
         try {
@@ -34,6 +37,14 @@ public class ChatFrame extends JFrame {
         }
         initUI();
         connectToServer();
+        createHistoryDirectory();
+    }
+
+    private void createHistoryDirectory() {
+        File dir = new File(HISTORY_DIR);
+        if (!dir.exists()) {
+            dir.mkdirs();
+        }
     }
 
     private void initUI() {
@@ -244,7 +255,6 @@ public class ChatFrame extends JFrame {
         if (!message.isEmpty() && currentReceiver != null && !currentReceiver.startsWith("--")) {
             if (currentReceiver.startsWith("GROUP_")) {
                 out.println("GROUP:" + currentReceiver + ":" + message);
-                appendMessage(username, message, true, true);
             } else {
                 out.println("PRIVATE:" + currentReceiver + ":" + message);
                 appendMessage(username, message, true, false);
@@ -355,33 +365,37 @@ public class ChatFrame extends JFrame {
         }
     }
 
+    private String getChatFileName(String sender, String receiver) {
+        if (receiver.startsWith("GROUP_")) {
+            return HISTORY_DIR + "/" + receiver + ".txt";
+        }
+        String[] names = new String[]{sender, receiver};
+        Arrays.sort(names);
+        return HISTORY_DIR + "/" + names[0] + "_" + names[1] + ".txt";
+    }
+
     private void loadConversationHistory() {
         clearChatArea();
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(
-                     "SELECT sender, receiver, message_type, message_content, file_path FROM messages " +
-                             "WHERE (sender = ? AND receiver = ?) OR (sender = ? AND receiver = ?) OR " +
-                             "(receiver = ? AND ? IN (SELECT group_name FROM chat_groups cg JOIN group_members gm " +
-                             "ON cg.group_id = gm.group_id WHERE gm.username = ?)) ORDER BY timestamp")) {
-            stmt.setString(1, username);
-            stmt.setString(2, currentReceiver);
-            stmt.setString(3, currentReceiver);
-            stmt.setString(4, username);
-            stmt.setString(5, currentReceiver);
-            stmt.setString(6, currentReceiver);
-            stmt.setString(7, username);
-            ResultSet rs = stmt.executeQuery();
-
-            while (rs.next()) {
-                String sender = rs.getString("sender");
-                String message = rs.getString("message_type").equals("FILE") ?
-                        "File: " + rs.getString("file_path") : rs.getString("message_content");
-                boolean isSent = sender.equals(username);
-                boolean isGroup = currentReceiver.startsWith("GROUP_");
-                appendMessage(sender, message, isSent, isGroup);
+        if (currentReceiver != null) {
+            String filePath = getChatFileName(username, currentReceiver);
+            File file = new File(filePath);
+            if (file.exists()) {
+                try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        String[] parts = line.split(" ", 3);
+                        if (parts.length >= 3) {
+                            String sender = parts[1].replace(":", "");
+                            String message = parts[2];
+                            boolean isSent = sender.equals(username);
+                            boolean isGroup = currentReceiver.startsWith("GROUP_");
+                            appendMessage(sender, message, isSent, isGroup);
+                        }
+                    }
+                } catch (IOException ex) {
+                    ex.printStackTrace();
+                }
             }
-        } catch (SQLException ex) {
-            ex.printStackTrace();
         }
     }
 }
