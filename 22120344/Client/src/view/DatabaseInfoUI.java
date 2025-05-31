@@ -1,34 +1,15 @@
-import Controller.DatabaseConnection;
+package Client.src.view;
+
+import Client.src.Controller.DatabaseConnection;
+import Client.src.view.ChatApplication;
+
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
-import java.sql.*;
-import javax.swing.border.*;
+import java.sql.SQLException;
+import javax.swing.border.EmptyBorder;
 
-public class ChatApplication {
-    public static void main(String[] args) {
-        // Set modern look and feel
-        try {
-            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-
-        SwingUtilities.invokeLater(() -> {
-            DatabaseInfoUI dbUI = new DatabaseInfoUI();
-            dbUI.setVisible(true);
-            centerWindow(dbUI);
-        });
-    }
-
-    public static void centerWindow(Window window) {
-        Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
-        window.setLocation((screenSize.width - window.getWidth()) / 2,
-                (screenSize.height - window.getHeight()) / 2);
-    }
-}
-
-class DatabaseInfoUI extends JFrame {
+public class DatabaseInfoUI extends JFrame {
     private JTextField dbNameField, hostField, userField;
     private JPasswordField passwordField;
 
@@ -38,35 +19,31 @@ class DatabaseInfoUI extends JFrame {
     }
 
     private void initUI() {
-        setTitle("Kết nối cơ sở dữ liệu");
+        setTitle("Database Connection");
         setSize(450, 350);
         setDefaultCloseOperation(EXIT_ON_CLOSE);
 
-        // Main panel with nice padding
         JPanel mainPanel = new JPanel();
         mainPanel.setLayout(new BoxLayout(mainPanel, BoxLayout.Y_AXIS));
         mainPanel.setBorder(new EmptyBorder(20, 30, 20, 30));
         mainPanel.setBackground(Color.WHITE);
 
-        // Form fields
         dbNameField = createTextField("chat_db");
         hostField = createTextField("localhost:3306");
         userField = createTextField("root");
         passwordField = new JPasswordField();
         passwordField.setPreferredSize(new Dimension(200, 30));
 
-        // Add fields to panel
-        mainPanel.add(createLabeledField("Tên cơ sở dữ liệu:", dbNameField));
+        mainPanel.add(createLabeledField("Database Name:", dbNameField));
         mainPanel.add(Box.createVerticalStrut(10));
-        mainPanel.add(createLabeledField("Host (ví dụ: localhost:3306):", hostField));
+        mainPanel.add(createLabeledField("Host (e.g., localhost:3306):", hostField));
         mainPanel.add(Box.createVerticalStrut(10));
-        mainPanel.add(createLabeledField("Tên người dùng:", userField));
+        mainPanel.add(createLabeledField("Username:", userField));
         mainPanel.add(Box.createVerticalStrut(10));
-        mainPanel.add(createLabeledField("Mật khẩu:", passwordField));
+        mainPanel.add(createLabeledField("Password:", passwordField));
         mainPanel.add(Box.createVerticalStrut(20));
 
-        // Connect button with modern style
-        JButton connectButton = new JButton("Kết nối");
+        JButton connectButton = new JButton("Connect");
         styleButton(connectButton, new Color(70, 130, 180));
         connectButton.addActionListener(this::connectToDatabase);
 
@@ -102,7 +79,6 @@ class DatabaseInfoUI extends JFrame {
     }
 
     private void setupWindow() {
-        setIconImage(Toolkit.getDefaultToolkit().getImage(getClass().getResource("/image/icon.png")));
         setLocationRelativeTo(null);
     }
 
@@ -113,7 +89,7 @@ class DatabaseInfoUI extends JFrame {
         String password = new String(passwordField.getPassword());
 
         if (dbName.isEmpty() || host.isEmpty() || user.isEmpty()) {
-            showError("Vui lòng điền đầy đủ các trường bắt buộc.");
+            showError("Please fill in all required fields.");
             return;
         }
 
@@ -122,15 +98,15 @@ class DatabaseInfoUI extends JFrame {
         try {
             DatabaseConnection.connect(url, user, password);
             if (DatabaseConnection.testConnection()) {
-                JOptionPane.showMessageDialog(this, "Kết nối cơ sở dữ liệu thành công!",
-                        "Thành công", JOptionPane.INFORMATION_MESSAGE);
+                JOptionPane.showMessageDialog(this, "Database connection successful!",
+                        "Success", JOptionPane.INFORMATION_MESSAGE);
                 openLoginScreen();
                 dispose();
             } else {
-                showError("Không thể thiết lập kết nối cơ sở dữ liệu.");
+                showError("Failed to establish database connection.");
             }
         } catch (SQLException ex) {
-            showError("Lỗi kết nối cơ sở dữ liệu:\n" + ex.getMessage());
+            showError("Database connection error:\n" + ex.getMessage());
             ex.printStackTrace();
         }
     }
@@ -146,7 +122,7 @@ class DatabaseInfoUI extends JFrame {
 
     private void showError(String message) {
         JOptionPane.showMessageDialog(this, message,
-                "Lỗi", JOptionPane.ERROR_MESSAGE);
+                "Error", JOptionPane.ERROR_MESSAGE);
     }
 
     private void openLoginScreen() {

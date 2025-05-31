@@ -1,4 +1,4 @@
-package Controller;
+package Client.src.Controller;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -11,13 +11,10 @@ public class DatabaseConnection {
         try {
             Class.forName("com.mysql.cj.jdbc.Driver");
             connection = DriverManager.getConnection(url, user, password);
-            System.out.println("Kết nối cơ sở dữ liệu thành công!");
-
-            // Thêm shutdown hook để đóng kết nối khi ứng dụng tắt
-            Runtime.getRuntime().addShutdownHook(new Thread(DatabaseConnection::closeConnection));
+            System.out.println("Database connection successful!");
         } catch (ClassNotFoundException e) {
-            System.err.println("Không tìm thấy MySQL JDBC Driver.");
-            throw new SQLException("Không tìm thấy MySQL JDBC Driver.", e);
+            System.err.println("MySQL JDBC Driver not found.");
+            throw new SQLException("MySQL JDBC Driver not found.", e);
         }
     }
 
@@ -38,9 +35,9 @@ public class DatabaseConnection {
         if (connection != null) {
             try {
                 connection.close();
-                System.out.println("Đã đóng kết nối cơ sở dữ liệu.");
+                System.out.println("Database connection closed.");
             } catch (SQLException e) {
-                System.err.println("Lỗi khi đóng kết nối: " + e.getMessage());
+                System.err.println("Error closing connection: " + e.getMessage());
             }
         }
     }

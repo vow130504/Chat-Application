@@ -3,14 +3,13 @@ DROP DATABASE IF EXISTS chat_db;
 CREATE DATABASE IF NOT EXISTS chat_db;
 USE chat_db;
 
-
 -- Tạo bảng users
 CREATE TABLE users (
     username VARCHAR(50) PRIMARY KEY,
     password VARCHAR(50) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Tạo bảng chat_groups (đổi tên từ groups để tránh xung đột tiềm ẩn)
+-- Tạo bảng chat_groups
 CREATE TABLE chat_groups (
     group_name VARCHAR(50) PRIMARY KEY,
     members TEXT NOT NULL
@@ -43,10 +42,3 @@ INSERT INTO messages (sender, receiver, message, timestamp) VALUES
 ('user1', 'user2', 'Hello user2!', '2025-05-30 19:00:00'),
 ('user2', 'user1', 'Hi user1!', '2025-05-30 19:01:00'),
 ('user1', 'GROUP_myGroup', 'Hello group!', '2025-05-30 19:02:00');
-
-
-
--- Xóa các bảng nếu đã tồn tại để tránh xung đột
-DROP TABLE IF EXISTS messages;
-DROP TABLE IF EXISTS chat_groups;
-DROP TABLE IF EXISTS users;
