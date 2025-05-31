@@ -33,27 +33,8 @@ CREATE TABLE group_members (
     INDEX idx_username (username)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Bảng messages: Lưu tin nhắn
-CREATE TABLE messages (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    sender VARCHAR(50) NOT NULL,
-    receiver VARCHAR(50) NOT NULL,
-    message_type ENUM('TEXT', 'FILE') DEFAULT 'TEXT' NOT NULL,
-    message_content TEXT NOT NULL,
-    file_path VARCHAR(255),
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (sender) REFERENCES users(username),
-    INDEX idx_sender_receiver (sender, receiver),
-    INDEX idx_timestamp (timestamp)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
 -- Chèn dữ liệu mẫu
 INSERT INTO users (username, password, is_online) VALUES
 ('user1', '123', FALSE),
 ('user2', '123', FALSE),
 ('user3', '123', FALSE);
-
-INSERT INTO messages (sender, receiver, message_type, message_content, timestamp) VALUES
-('user1', 'user2', 'TEXT', 'Hello user2!', '2025-05-30 19:00:00'),
-('user2', 'user1', 'TEXT', 'Hi user1!', '2025-05-30 19:01:00'),
-('user1', 'myGroup', 'TEXT', 'Hello group!', '2025-05-30 19:02:00');
