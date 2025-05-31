@@ -49,17 +49,9 @@ CREATE TABLE messages (
 
 -- Chèn dữ liệu mẫu
 INSERT INTO users (username, password, is_online) VALUES
-('user1', '$2a$10$N9qo8uLOickgx2ZMRZoMy.Mrq8Q5U1M1kF5u6G0dJjJ9vJZJQ1qW.', FALSE),
-('user2', '$2a$10$N9qo8uLOickgx2ZMRZoMy.Mrq8Q5U1M1kF5u6G0dJjJ9vJZJQ1qW.', FALSE),
-('user3', '$2a$10$N9qo8uLOickgx2ZMRZoMy.Mrq8Q5U1M1kF5u6G0dJjJ9vJZJQ1qW.', FALSE);
-
-INSERT INTO chat_groups (group_name, creator) VALUES
-('myGroup', 'user1');
-
-INSERT INTO group_members (group_id, username) VALUES
-(1, 'user1'),
-(1, 'user2'),
-(1, 'user3');
+('user1', '123', FALSE),
+('user2', '123', FALSE),
+('user3', '123', FALSE);
 
 INSERT INTO messages (sender, receiver, message_type, message_content, timestamp) VALUES
 ('user1', 'user2', 'TEXT', 'Hello user2!', '2025-05-30 19:00:00'),

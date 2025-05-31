@@ -3,6 +3,7 @@ package Client.src.view;
 import Client.src.Controller.DatabaseConnection;
 import javax.swing.*;
 import javax.swing.border.*;
+import javax.swing.text.html.HTMLEditorKit;
 import java.awt.*;
 import java.awt.event.*;
 import java.io.*;
@@ -16,8 +17,9 @@ public class ChatFrame extends JFrame {
     private Socket socket;
     private PrintWriter out;
     private BufferedReader in;
+    private String currentReceiver; // Người nhận hiện tại (người dùng hoặc nhóm)
 
-    private JTextArea chatArea;
+    private JEditorPane chatArea; // Thay JTextArea bằng JEditorPane để hỗ trợ HTML
     private JTextField messageField;
     private JList<String> onlineUsersList;
     private DefaultListModel<String> onlineUsersModel;
@@ -54,20 +56,22 @@ public class ChatFrame extends JFrame {
         onlineUsersList = new JList<>(onlineUsersModel);
         onlineUsersList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         onlineUsersList.setBackground(new Color(250, 250, 250));
-        onlineUsersList.addListSelectionListener(e -> updateReceiverLabel());
+        onlineUsersList.addListSelectionListener(e -> updateReceiver());
         JScrollPane usersScrollPane = new JScrollPane(onlineUsersList);
         usersPanel.add(usersScrollPane, BorderLayout.CENTER);
 
-        receiverLabel = new JLabel("Đang chat với: Tất cả");
+        receiverLabel = new JLabel("Chọn người dùng hoặc nhóm để chat");
         receiverLabel.setBorder(new EmptyBorder(5, 5, 5, 5));
         usersPanel.add(receiverLabel, BorderLayout.NORTH);
 
         // Chat area
-        chatArea = new JTextArea();
+        chatArea = new JEditorPane();
+        chatArea.setContentType("text/html");
         chatArea.setEditable(false);
-        chatArea.setFont(new Font("Arial", Font.PLAIN, 14));
         chatArea.setBackground(Color.WHITE);
         chatArea.setBorder(new LineBorder(new Color(200, 200, 200)));
+        chatArea.setEditorKit(new HTMLEditorKit());
+        chatArea.setText("<html><body style='font-family: Arial; font-size: 14px; padding: 10px;'></body></html>");
         JScrollPane chatScrollPane = new JScrollPane(chatArea);
 
         // Message input panel
@@ -112,6 +116,7 @@ public class ChatFrame extends JFrame {
     private void styleButton(JButton button, Color bgColor) {
         button.setFocusPainted(false);
         button.setBackground(bgColor);
+        button.setForeground(Color.WHITE);
         button.setFont(new Font("Arial", Font.BOLD, 12));
         button.setBorder(new LineBorder(bgColor.darker(), 1));
     }
@@ -119,13 +124,49 @@ public class ChatFrame extends JFrame {
     private void styleGroupButton(JButton button, Color bgColor) {
         button.setFocusPainted(false);
         button.setBackground(bgColor);
+        button.setForeground(Color.WHITE);
         button.setFont(new Font("Arial", Font.BOLD, 12));
         button.setBorder(new LineBorder(bgColor.darker(), 1));
     }
 
-    private void updateReceiverLabel() {
+    private void updateReceiver() {
         String selected = onlineUsersList.getSelectedValue();
-        receiverLabel.setText("Đang chat với: " + (selected != null ? selected : "Tất cả"));
+        if (selected != null && !selected.startsWith("--")) {
+            currentReceiver = selected;
+            receiverLabel.setText("Đang chat với: " + selected);
+            loadConversationHistory();
+        } else {
+            currentReceiver = null;
+            receiverLabel.setText("Chọn người dùng hoặc nhóm để chat");
+            clearChatArea();
+        }
+    }
+
+    private void clearChatArea() {
+        chatArea.setText("<html><body style='font-family: Arial; font-size: 14px; padding: 10px;'></body></html>");
+    }
+
+    private void appendMessage(String sender, String message, boolean isSent, boolean isGroup) {
+        String bubbleStyle = isSent ?
+                "background-color: #0084ff; color: white; border-radius: 10px; padding: 8px 12px; margin: 5px; max-width: 60%; display: inline-block; text-align: left; box-shadow: 1px 1px 3px rgba(0,0,0,0.2);" :
+                "background-color: #e9ecef; color: black; border-radius: 10px; padding: 8px 12px; margin: 5px; max-width: 60%; display: inline-block; text-align: left; box-shadow: 1px 1px 3px rgba(0,0,0,0.2);";
+        String alignStyle = isSent ? "text-align: right;" : "text-align: left;";
+        String senderName = isGroup && !isSent ? sender + ": " : "";
+        String html = String.format(
+                "<div style='%s'><div style='%s'>%s%s</div></div>",
+                alignStyle, bubbleStyle, senderName, message.replace("\n", "<br>")
+        );
+
+        String currentContent = chatArea.getText();
+        String newContent = currentContent.replace("</body>", html + "</body>");
+        chatArea.setText(newContent);
+
+        // Cuộn xuống cuối
+        SwingUtilities.invokeLater(() -> {
+            JScrollPane scrollPane = (JScrollPane) chatArea.getParent().getParent();
+            JScrollBar vertical = scrollPane.getVerticalScrollBar();
+            vertical.setValue(vertical.getMaximum());
+        });
     }
 
     private void connectToServer() {
@@ -137,7 +178,6 @@ public class ChatFrame extends JFrame {
             out.println(username);
 
             new Thread(this::listenForMessages).start();
-            loadChatHistory();
         } catch (IOException e) {
             JOptionPane.showMessageDialog(this, "Không thể kết nối đến server: " + e.getMessage(),
                     "Lỗi", JOptionPane.ERROR_MESSAGE);
@@ -154,9 +194,22 @@ public class ChatFrame extends JFrame {
                 } else if (message.startsWith("FILE:")) {
                     receiveFile(message);
                 } else if (message.startsWith("GROUP_CREATED:")) {
-                    chatArea.append("Nhóm được tạo: " + message.substring("GROUP_CREATED:".length()) + "\n");
-                } else {
-                    chatArea.append(message + "\n");
+                    appendMessage("Hệ thống", "Nhóm được tạo: " + message.substring("GROUP_CREATED:".length()), false, false);
+                } else if (message.startsWith("PRIVATE:")) {
+                    String[] parts = message.split(":", 3);
+                    String sender = parts[1];
+                    String msg = parts[2];
+                    if (currentReceiver != null && currentReceiver.equals(sender)) {
+                        appendMessage(sender, msg, false, false);
+                    }
+                } else if (message.startsWith("GROUP:")) {
+                    String[] parts = message.split(":", 4);
+                    String groupName = parts[1];
+                    String sender = parts[2];
+                    String msg = parts[3];
+                    if (currentReceiver != null && currentReceiver.equals(groupName)) {
+                        appendMessage(sender, msg, sender.equals(username), true);
+                    }
                 }
             }
         } catch (IOException e) {
@@ -188,50 +241,49 @@ public class ChatFrame extends JFrame {
 
     private void sendMessage(ActionEvent e) {
         String message = messageField.getText().trim();
-        if (!message.isEmpty()) {
-            String receiver = onlineUsersList.getSelectedValue();
-            if (receiver != null && !receiver.equals(username) && !receiver.startsWith("--")) {
-                if (receiver.startsWith("GROUP_")) {
-                    out.println("GROUP:" + receiver + ":" + message);
-                } else {
-                    out.println("PRIVATE:" + receiver + ":" + message);
-                }
+        if (!message.isEmpty() && currentReceiver != null && !currentReceiver.startsWith("--")) {
+            if (currentReceiver.startsWith("GROUP_")) {
+                out.println("GROUP:" + currentReceiver + ":" + message);
+                appendMessage(username, message, true, true);
             } else {
-                out.println("ALL:" + message);
+                out.println("PRIVATE:" + currentReceiver + ":" + message);
+                appendMessage(username, message, true, false);
             }
             messageField.setText("");
+        } else {
+            JOptionPane.showMessageDialog(this, "Vui lòng chọn người dùng hoặc nhóm để gửi tin nhắn.",
+                    "Lỗi", JOptionPane.ERROR_MESSAGE);
         }
     }
 
     private void sendFile(ActionEvent e) {
+        if (currentReceiver == null || currentReceiver.startsWith("GROUP_") || currentReceiver.startsWith("--")) {
+            JOptionPane.showMessageDialog(this, "Vui lòng chọn một người dùng (không phải nhóm) để gửi file.",
+                    "Lỗi", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
         JFileChooser fileChooser = new JFileChooser();
         if (fileChooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
             File file = fileChooser.getSelectedFile();
-            String receiver = onlineUsersList.getSelectedValue();
-
-            if (receiver != null && !receiver.startsWith("GROUP_") && !receiver.startsWith("--")) {
-                new Thread(() -> {
-                    try {
-                        out.println("FILE:" + receiver + ":" + file.getName());
-                        FileInputStream fis = new FileInputStream(file);
-                        OutputStream os = socket.getOutputStream();
-                        byte[] buffer = new byte[1024];
-                        int bytesRead;
-                        while ((bytesRead = fis.read(buffer)) != -1) {
-                            os.write(buffer, 0, bytesRead);
-                        }
-                        fis.close();
-                        chatArea.append("Đã gửi file " + file.getName() + " đến " + receiver + "\n");
-                    } catch (IOException ex) {
-                        JOptionPane.showMessageDialog(this, "Lỗi khi gửi file: " + ex.getMessage(),
-                                "Lỗi", JOptionPane.ERROR_MESSAGE);
-                        ex.printStackTrace();
+            new Thread(() -> {
+                try {
+                    out.println("FILE:" + currentReceiver + ":" + file.getName());
+                    FileInputStream fis = new FileInputStream(file);
+                    OutputStream os = socket.getOutputStream();
+                    byte[] buffer = new byte[1024];
+                    int bytesRead;
+                    while ((bytesRead = fis.read(buffer)) != -1) {
+                        os.write(buffer, 0, bytesRead);
                     }
-                }).start();
-            } else {
-                JOptionPane.showMessageDialog(this, "Vui lòng chọn một người dùng (không phải nhóm) để gửi file.",
-                        "Lỗi", JOptionPane.ERROR_MESSAGE);
-            }
+                    fis.close();
+                    appendMessage(username, "Đã gửi file: " + file.getName(), true, false);
+                } catch (IOException ex) {
+                    JOptionPane.showMessageDialog(this, "Lỗi khi gửi file: " + ex.getMessage(),
+                            "Lỗi", JOptionPane.ERROR_MESSAGE);
+                    ex.printStackTrace();
+                }
+            }).start();
         }
     }
 
@@ -240,33 +292,35 @@ public class ChatFrame extends JFrame {
         String sender = parts[1];
         String fileName = parts[2];
 
-        int response = JOptionPane.showConfirmDialog(this,
-                sender + " muốn gửi bạn file: " + fileName + ". Chấp nhận?",
-                "Nhận File", JOptionPane.YES_NO_OPTION);
+        if (currentReceiver != null && currentReceiver.equals(sender)) {
+            int response = JOptionPane.showConfirmDialog(this,
+                    sender + " muốn gửi bạn file: " + fileName + ". Chấp nhận?",
+                    "Nhận File", JOptionPane.YES_NO_OPTION);
 
-        if (response == JOptionPane.YES_OPTION) {
-            JFileChooser fileChooser = new JFileChooser();
-            fileChooser.setSelectedFile(new File(fileName));
-            if (fileChooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
-                File file = fileChooser.getSelectedFile();
-                new Thread(() -> {
-                    try {
-                        FileOutputStream fos = new FileOutputStream(file);
-                        InputStream is = socket.getInputStream();
-                        byte[] buffer = new byte[1024];
-                        int bytesRead;
-                        while ((bytesRead = is.read(buffer)) != -1) {
-                            fos.write(buffer, 0, bytesRead);
-                            if (is.available() == 0) break;
+            if (response == JOptionPane.YES_OPTION) {
+                JFileChooser fileChooser = new JFileChooser();
+                fileChooser.setSelectedFile(new File(fileName));
+                if (fileChooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
+                    File file = fileChooser.getSelectedFile();
+                    new Thread(() -> {
+                        try {
+                            FileOutputStream fos = new FileOutputStream(file);
+                            InputStream is = socket.getInputStream();
+                            byte[] buffer = new byte[1024];
+                            int bytesRead;
+                            while ((bytesRead = is.read(buffer)) != -1) {
+                                fos.write(buffer, 0, bytesRead);
+                                if (is.available() == 0) break;
+                            }
+                            fos.close();
+                            appendMessage(sender, "Đã nhận file: " + fileName, false, false);
+                        } catch (IOException ex) {
+                            JOptionPane.showMessageDialog(this, "Lỗi khi nhận file: " + ex.getMessage(),
+                                    "Lỗi", JOptionPane.ERROR_MESSAGE);
+                            ex.printStackTrace();
                         }
-                        fos.close();
-                        chatArea.append("Đã nhận file từ " + sender + ": " + file.getAbsolutePath() + "\n");
-                    } catch (IOException ex) {
-                        JOptionPane.showMessageDialog(this, "Lỗi khi nhận file: " + ex.getMessage(),
-                                "Lỗi", JOptionPane.ERROR_MESSAGE);
-                        ex.printStackTrace();
-                    }
-                }).start();
+                    }).start();
+                }
             }
         }
     }
@@ -301,26 +355,30 @@ public class ChatFrame extends JFrame {
         }
     }
 
-    private void loadChatHistory() {
+    private void loadConversationHistory() {
+        clearChatArea();
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement stmt = conn.prepareStatement(
                      "SELECT sender, receiver, message_type, message_content, file_path FROM messages " +
-                             "WHERE receiver = ? OR sender = ? OR receiver IN " +
-                             "(SELECT group_name FROM chat_groups cg JOIN group_members gm ON cg.group_id = gm.group_id " +
-                             "WHERE gm.username = ?) ORDER BY timestamp")) {
+                             "WHERE (sender = ? AND receiver = ?) OR (sender = ? AND receiver = ?) OR " +
+                             "(receiver = ? AND ? IN (SELECT group_name FROM chat_groups cg JOIN group_members gm " +
+                             "ON cg.group_id = gm.group_id WHERE gm.username = ?)) ORDER BY timestamp")) {
             stmt.setString(1, username);
-            stmt.setString(2, username);
-            stmt.setString(3, username);
+            stmt.setString(2, currentReceiver);
+            stmt.setString(3, currentReceiver);
+            stmt.setString(4, username);
+            stmt.setString(5, currentReceiver);
+            stmt.setString(6, currentReceiver);
+            stmt.setString(7, username);
             ResultSet rs = stmt.executeQuery();
 
             while (rs.next()) {
-                String display = rs.getString("sender") + " -> " + rs.getString("receiver") + ": ";
-                if (rs.getString("message_type").equals("FILE")) {
-                    display += "File: " + rs.getString("file_path");
-                } else {
-                    display += rs.getString("message_content");
-                }
-                chatArea.append(display + "\n");
+                String sender = rs.getString("sender");
+                String message = rs.getString("message_type").equals("FILE") ?
+                        "File: " + rs.getString("file_path") : rs.getString("message_content");
+                boolean isSent = sender.equals(username);
+                boolean isGroup = currentReceiver.startsWith("GROUP_");
+                appendMessage(sender, message, isSent, isGroup);
             }
         } catch (SQLException ex) {
             ex.printStackTrace();

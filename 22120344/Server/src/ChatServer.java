@@ -96,8 +96,8 @@ public class ChatServer {
                     } else if (message.startsWith("CREATE_GROUP:")) {
                         handleCreateGroup(message);
                     } else {
-                        broadcast(username + ": " + message, username);
-                        saveMessage(username, "ALL", "TEXT", message, null);
+                        // Không gửi tin nhắn chung nữa
+                        sendMessage("ERROR: Vui lòng chọn người nhận hoặc nhóm để gửi tin nhắn.");
                     }
                 }
             } catch (IOException e) {
@@ -145,6 +145,7 @@ public class ChatServer {
                 if (receiverHandler != null) {
                     receiverHandler.sendMessage("PRIVATE:" + username + ":" + msg);
                     saveMessage(username, receiver, "TEXT", msg, null);
+                    sendMessage("PRIVATE:" + username + ":" + msg); // Gửi lại cho người gửi
                 } else {
                     sendMessage("ERROR: Người dùng " + receiver + " đang offline");
                 }
@@ -166,11 +167,9 @@ public class ChatServer {
 
                     while (rs.next()) {
                         String member = rs.getString("username").trim();
-                        if (!member.equals(username)) {
-                            ClientHandler memberHandler = clients.get(member);
-                            if (memberHandler != null) {
-                                memberHandler.sendMessage("GROUP:" + groupName + ":" + username + ":" + msg);
-                            }
+                        ClientHandler memberHandler = clients.get(member);
+                        if (memberHandler != null) {
+                            memberHandler.sendMessage("GROUP:" + groupName + ":" + username + ":" + msg);
                         }
                     }
                     saveMessage(username, groupName, "TEXT", msg, null);
@@ -192,7 +191,6 @@ public class ChatServer {
                     receiverHandler.sendMessage("FILE:" + username + ":" + fileName);
                     String filePath = "server_files/" + fileName;
                     saveMessage(username, receiver, "FILE", "Sent file: " + fileName, filePath);
-                    // File content will be sent directly through the socket
                 } else {
                     sendMessage("ERROR: Người dùng " + receiver + " đang offline");
                 }
