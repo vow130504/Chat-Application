@@ -14,13 +14,18 @@ public class ChatServer {
     private static final Map<String, ClientHandler> clients = new ConcurrentHashMap<>();
     private static ServerSocket serverSocket;
     private static final String HISTORY_DIR = "server_files/chat_history";
+    private static final String UPLOAD_DIR = "server_files/uploads";
     private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
 
     public static void main(String[] args) {
         try {
-            File dir = new File(HISTORY_DIR);
-            if (!dir.exists()) {
-                dir.mkdirs();
+            File historyDir = new File(HISTORY_DIR);
+            if (!historyDir.exists()) {
+                historyDir.mkdirs();
+            }
+            File uploadDir = new File(UPLOAD_DIR);
+            if (!uploadDir.exists()) {
+                uploadDir.mkdirs();
             }
             DatabaseConnection.connect(
                     "jdbc:mysql://localhost:3306/chat_db?useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC",
@@ -59,17 +64,17 @@ public class ChatServer {
         return HISTORY_DIR + "/" + names[0] + "_" + names[1] + ".txt";
     }
 
-    private static void saveMessageToFile(String sender, String receiver, String messageContent, String filePath) {
+    private static void saveMessageToFile(String sender, String receiver, String messageContent, String fileName) {
         try {
-            String fileName = getChatFileName(sender, receiver);
-            File file = new File(fileName);
+            String filePath = getChatFileName(sender, receiver);
+            File file = new File(filePath);
             File parentDir = file.getParentFile();
             if (!parentDir.exists()) {
                 parentDir.mkdirs();
             }
             String message = "[" + DATE_FORMAT.format(new Date()) + "] " + sender + ":" +
-                    (filePath != null ? " File: " + new File(filePath).getName() : messageContent);
-            try (BufferedWriter writer = new BufferedWriter(new FileWriter(fileName, true))) {
+                    (fileName != null ? "File: " + fileName : messageContent);
+            try (BufferedWriter writer = new BufferedWriter(new FileWriter(filePath, true))) {
                 writer.write(message);
                 writer.newLine();
             }
@@ -123,6 +128,7 @@ public class ChatServer {
 
                 String message;
                 while ((message = in.readLine()) != null) {
+                    System.out.println("Received from " + username + ": " + message);
                     if (message.startsWith("PRIVATE:")) {
                         handlePrivateMessage(message);
                     } else if (message.startsWith("GROUP:")) {
@@ -131,6 +137,8 @@ public class ChatServer {
                         handleFileTransfer(message);
                     } else if (message.startsWith("CREATE_GROUP:")) {
                         handleCreateGroup(message);
+                    } else if (message.startsWith("DOWNLOAD:")) {
+                        handleFileDownload(message);
                     } else {
                         sendMessage("ERROR: Vui lòng chọn người nhận hoặc nhóm để gửi tin nhắn.");
                     }
@@ -180,7 +188,6 @@ public class ChatServer {
                 if (receiverHandler != null) {
                     receiverHandler.sendMessage("PRIVATE:" + username + ":" + msg);
                     saveMessageToFile(username, receiver, msg, null);
-                    // Xóa dòng: sendMessage("PRIVATE:" + username + ":" + msg);
                 } else {
                     sendMessage("ERROR: Người dùng " + receiver + " đang offline");
                 }
@@ -202,15 +209,12 @@ public class ChatServer {
 
                     while (rs.next()) {
                         String member = rs.getString("username").trim();
-                        if (!member.equals(username)) { // Không gửi lại cho người gửi
-                            ClientHandler memberHandler = clients.get(member);
-                            if (memberHandler != null) {
-                                memberHandler.sendMessage("GROUP:" + groupName + ":" + username + ":" + msg);
-                            }
+                        ClientHandler memberHandler = clients.get(member);
+                        if (memberHandler != null) {
+                            memberHandler.sendMessage("GROUP:" + groupName + ":" + username + ":" + msg);
                         }
                     }
                     saveMessageToFile(username, groupName, msg, null);
-                    sendMessage("GROUP:" + groupName + ":" + username + ":" + msg); // Gửi lại cho người gửi
                 } catch (SQLException e) {
                     sendMessage("ERROR: Nhóm " + groupName + " không tồn tại");
                     e.printStackTrace();
@@ -224,13 +228,56 @@ public class ChatServer {
                 String receiver = parts[1];
                 String fileName = parts[2];
 
-                ClientHandler receiverHandler = clients.get(receiver);
-                if (receiverHandler != null) {
-                    receiverHandler.sendMessage("FILE:" + username + ":" + fileName);
-                    String filePath = "server_files/" + fileName;
-                    saveMessageToFile(username, receiver, null, filePath);
+                try {
+                    // Save file to server
+                    File file = new File(UPLOAD_DIR + "/" + fileName);
+                    try (FileOutputStream fos = new FileOutputStream(file)) {
+                        InputStream is = socket.getInputStream();
+                        byte[] buffer = new byte[4096];
+                        int bytesRead;
+                        while ((bytesRead = is.read(buffer)) > 0) {
+                            fos.write(buffer, 0, bytesRead);
+                            if (is.available() == 0) break;
+                        }
+                    }
+
+                    ClientHandler receiverHandler = clients.get(receiver);
+                    if (receiverHandler != null) {
+                        receiverHandler.sendMessage("FILE:" + username + ":" + fileName);
+                        saveMessageToFile(username, receiver, null, fileName);
+                    } else {
+                        sendMessage("ERROR: Người dùng " + receiver + " đang offline");
+                    }
+                } catch (IOException e) {
+                    sendMessage("ERROR: Lỗi khi lưu file");
+                    e.printStackTrace();
+                }
+            }
+        }
+
+        private void handleFileDownload(String message) {
+            String[] parts = message.split(":", 2);
+            if (parts.length == 2) {
+                String fileName = parts[1];
+                File file = new File(UPLOAD_DIR + "/" + fileName);
+                if (file.exists()) {
+                    try {
+                        sendMessage("DOWNLOAD:" + fileName);
+                        try (FileInputStream fis = new FileInputStream(file)) {
+                            OutputStream os = socket.getOutputStream();
+                            byte[] buffer = new byte[4096];
+                            int bytesRead;
+                            while ((bytesRead = fis.read(buffer)) != -1) {
+                                os.write(buffer, 0, bytesRead);
+                            }
+                            os.flush();
+                        }
+                    } catch (IOException e) {
+                        sendMessage("ERROR: Lỗi khi gửi file");
+                        e.printStackTrace();
+                    }
                 } else {
-                    sendMessage("ERROR: Người dùng " + receiver + " đang offline");
+                    sendMessage("ERROR: File không tồn tại trên server");
                 }
             }
         }

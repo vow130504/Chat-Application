@@ -99,8 +99,17 @@ public class ChatFrame extends JFrame {
         chatArea.setEditable(false);
         chatArea.setBackground(Color.WHITE);
         chatArea.setBorder(new LineBorder(new Color(200, 200, 200)));
-        chatArea.setEditorKit(new HTMLEditorKit());
+        HTMLEditorKit kit = new HTMLEditorKit();
+        chatArea.setEditorKit(kit);
         chatArea.setText("<html><body style='font-family: Arial; font-size: 14px; padding: 10px;'></body></html>");
+
+        // Enable hyperlink clicking
+        chatArea.addHyperlinkListener(e -> {
+            if (e.getEventType() == javax.swing.event.HyperlinkEvent.EventType.ACTIVATED) {
+                String filename = e.getDescription();
+                downloadFile(filename);
+            }
+        });
 
         JPopupMenu popupMenu = new JPopupMenu();
         JMenuItem deleteItem = new JMenuItem("Xóa");
@@ -232,7 +241,6 @@ public class ChatFrame extends JFrame {
                 }
             }
 
-            // Handle p-implied
             if (current.getName().equals("p-implied") && current.getParentElement() != null) {
                 stack.push(current.getParentElement());
             }
@@ -292,9 +300,20 @@ public class ChatFrame extends JFrame {
         String alignStyle = isSent ? "text-align: right;" : "text-align: left;";
         String senderName = isGroup && !isSent ? sender + ": " : "";
         String messageId = "msg-" + messageCounter++;
+
+        // Check if message is a file
+        String content;
+        if (message.startsWith("File: ")) {
+            String filename = message.substring(6);
+            content = String.format("<a href='%s' style='color: %s; text-decoration: underline;'>%s</a>",
+                    filename, isSent ? "white" : "blue", filename);
+        } else {
+            content = message.replace("\n", "<br>");
+        }
+
         String html = String.format(
                 "<div style='%s'><div id='%s' style='%s'>%s%s</div></div>",
-                alignStyle, messageId, bubbleStyle, senderName, message.replace("\n", "<br>")
+                alignStyle, messageId, bubbleStyle, senderName, content
         );
 
         HTMLDocument doc = (HTMLDocument) chatArea.getDocument();
@@ -439,7 +458,9 @@ public class ChatFrame extends JFrame {
                 if (message.startsWith("ONLINE_USERS_AND_GROUPS:")) {
                     updateOnlineUsersAndGroups(message.substring("ONLINE_USERS_AND_GROUPS:".length()));
                 } else if (message.startsWith("FILE:")) {
-                    receiveFile(message);
+                    handleFileMessage(message);
+                } else if (message.startsWith("DOWNLOAD:")) {
+                    receiveFileData(message);
                 } else if (message.startsWith("GROUP_CREATED:")) {
                     String timestamp = DATE_FORMAT.format(new Date());
                     appendMessage("Hệ thống", "Nhóm được tạo: " + message.substring("GROUP_CREATED:".length()), false, false, timestamp);
@@ -497,10 +518,38 @@ public class ChatFrame extends JFrame {
         });
     }
 
+    private void handleFileMessage(String message) {
+        String[] parts = message.split(":", 3);
+        if (parts.length == 3) {
+            String sender = parts[1];
+            String fileName = parts[2];
+            if (currentReceiver != null && currentReceiver.equals(sender)) {
+                String timestamp = DATE_FORMAT.format(new Date());
+                appendMessage(sender, "File: " + fileName, false, false, timestamp);
+                saveMessageToFile(sender, username, "File: " + fileName, timestamp);
+            }
+        }
+    }
     private void sendMessage(ActionEvent e) {
         String message = messageField.getText().trim();
-        if (!message.isEmpty() && currentReceiver != null && !currentReceiver.startsWith("--")) {
-            String timestamp = DATE_FORMAT.format(new Date());
+        if (message.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Vui lòng nhập nội dung tin nhắn.",
+                    "Lỗi", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        if (currentReceiver == null || currentReceiver.isEmpty() || currentReceiver.startsWith("--")) {
+            JOptionPane.showMessageDialog(this, "Vui lòng chọn người dùng hoặc nhóm để gửi tin nhắn.",
+                    "Lỗi", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        if (out == null) {
+            JOptionPane.showMessageDialog(this, "Không thể gửi tin nhắn: Mất kết nối với server.",
+                    "Lỗi", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        String timestamp = DATE_FORMAT.format(new Date());
+        try {
             if (currentReceiver.startsWith("GROUP_")) {
                 out.println("GROUP:" + currentReceiver + ":" + message);
                 saveMessageToFile(username, currentReceiver, message, timestamp);
@@ -509,34 +558,14 @@ public class ChatFrame extends JFrame {
                 appendMessage(username, message, true, false, timestamp);
                 saveMessageToFile(username, currentReceiver, message, timestamp);
             }
+            out.flush();
             messageField.setText("");
-        } else {
-            JOptionPane.showMessageDialog(this, "Vui lòng chọn người dùng hoặc nhóm để gửi tin nhắn.",
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Lỗi khi gửi tin nhắn: " + ex.getMessage(),
                     "Lỗi", JOptionPane.ERROR_MESSAGE);
+            ex.printStackTrace();
         }
     }
-
-    private void saveMessageToFile(String sender, String receiver, String message, String timestamp) {
-        try {
-            String fileName = getChatFileName(sender, receiver);
-            File file = new File(fileName);
-            File parentDir = file.getParentFile();
-            if (!parentDir.exists()) {
-                parentDir.mkdirs();
-            }
-            String formattedMessage = "[" + timestamp + "] " + sender + ":" + message;
-            try (BufferedWriter writer = new BufferedWriter(new FileWriter(fileName, true))) {
-                writer.write(formattedMessage);
-                writer.newLine();
-            }
-            System.out.println("Saved to " + fileName + ": " + formattedMessage);
-        } catch (IOException e) {
-            e.printStackTrace();
-            JOptionPane.showMessageDialog(this, "Lỗi khi lưu tin nhắn vào lịch sử: " + e.getMessage(),
-                    "Lỗi", JOptionPane.ERROR_MESSAGE);
-        }
-    }
-
     private void sendFile(ActionEvent e) {
         if (currentReceiver == null || currentReceiver.startsWith("GROUP_") || currentReceiver.startsWith("--")) {
             JOptionPane.showMessageDialog(this, "Vui lòng chọn một người dùng (không phải nhóm) để gửi file.",
@@ -549,8 +578,11 @@ public class ChatFrame extends JFrame {
             File file = fileChooser.getSelectedFile();
             new Thread(() -> {
                 try {
+                    // Send file metadata
                     out.println("FILE:" + currentReceiver + ":" + file.getName());
                     out.flush();
+
+                    // Send file content to server
                     FileInputStream fis = new FileInputStream(file);
                     OutputStream os = socket.getOutputStream();
                     byte[] buffer = new byte[4096];
@@ -560,8 +592,9 @@ public class ChatFrame extends JFrame {
                     }
                     fis.close();
                     os.flush();
+
                     String timestamp = DATE_FORMAT.format(new Date());
-                    appendMessage(username, "Đã gửi file: " + file.getName(), true, false, timestamp);
+                    appendMessage(username, "File: " + file.getName(), true, false, timestamp);
                     saveMessageToFile(username, currentReceiver, "File: " + file.getName(), timestamp);
                 } catch (IOException ex) {
                     JOptionPane.showMessageDialog(this, "Lỗi khi gửi file: " + ex.getMessage(),
@@ -572,41 +605,46 @@ public class ChatFrame extends JFrame {
         }
     }
 
-    private void receiveFile(String message) {
-        String[] parts = message.split(":");
-        if (parts.length == 3) {
-            String sender = parts[1];
-            String fileName = parts[2];
+    private void downloadFile(String filename) {
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setSelectedFile(new File(filename));
+        if (fileChooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
+            File file = fileChooser.getSelectedFile();
+            new Thread(() -> {
+                try {
+                    out.println("DOWNLOAD:" + filename);
+                    out.flush();
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(this, "Lỗi khi yêu cầu tải file: " + ex.getMessage(),
+                            "Lỗi", JOptionPane.ERROR_MESSAGE);
+                    ex.printStackTrace();
+                }
+            }).start();
+        }
+    }
 
-            if (currentReceiver != null && currentReceiver.equals(sender)) {
-                int response = JOptionPane.showConfirmDialog(this,
-                        sender + " muốn gửi bạn file: " + fileName, "Nhận File", JOptionPane.YES_NO_OPTION);
-                if (response == JOptionPane.YES_OPTION) {
-                    JFileChooser fileChooser = new JFileChooser();
-                    fileChooser.setSelectedFile(new File(fileName));
-                    if (fileChooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
-                        File file = fileChooser.getSelectedFile();
-                        new Thread(() -> {
-                            try {
-                                FileOutputStream fos = new FileOutputStream(file);
-                                InputStream is = socket.getInputStream();
-                                byte[] buffer = new byte[4096];
-                                int bytesRead;
-                                while ((bytesRead = is.read(buffer)) > 0) {
-                                    fos.write(buffer, 0, bytesRead);
-                                    if (is.available() == 0) break;
-                                }
-                                fos.close();
-                                String timestamp = DATE_FORMAT.format(new Date());
-                                appendMessage(sender, "Đã nhận file: " + fileName, false, false, timestamp);
-                                saveMessageToFile(sender, username, "File: " + fileName, timestamp);
-                            } catch (IOException ex) {
-                                JOptionPane.showMessageDialog(this, "Lỗi khi nhận file: " + ex.getMessage(),
-                                        "Lỗi", JOptionPane.ERROR_MESSAGE);
-                                ex.printStackTrace();
-                            }
-                        }).start();
+    private void receiveFileData(String message) {
+        String[] parts = message.split(":", 2);
+        if (parts.length == 2) {
+            String filename = parts[1];
+            JFileChooser fileChooser = new JFileChooser();
+            fileChooser.setSelectedFile(new File(filename));
+            if (fileChooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
+                File file = fileChooser.getSelectedFile();
+                try (FileOutputStream fos = new FileOutputStream(file)) {
+                    InputStream is = socket.getInputStream();
+                    byte[] buffer = new byte[4096];
+                    int bytesRead;
+                    while ((bytesRead = is.read(buffer)) > 0) {
+                        fos.write(buffer, 0, bytesRead);
+                        if (is.available() == 0) break;
                     }
+                    JOptionPane.showMessageDialog(this, "Đã tải file: " + filename,
+                            "Thành công", JOptionPane.INFORMATION_MESSAGE);
+                } catch (IOException ex) {
+                    JOptionPane.showMessageDialog(this, "Lỗi khi nhận file: " + ex.getMessage(),
+                            "Lỗi", JOptionPane.ERROR_MESSAGE);
+                    ex.printStackTrace();
                 }
             }
         }
@@ -651,6 +689,27 @@ public class ChatFrame extends JFrame {
         String[] names = new String[]{sender, receiver};
         Arrays.sort(names);
         return HISTORY_DIR + "/" + names[0] + "_" + names[1] + ".txt";
+    }
+
+    private void saveMessageToFile(String sender, String receiver, String message, String timestamp) {
+        try {
+            String fileName = getChatFileName(sender, receiver);
+            File file = new File(fileName);
+            File parentDir = file.getParentFile();
+            if (!parentDir.exists()) {
+                parentDir.mkdirs();
+            }
+            String formattedMessage = "[" + timestamp + "] " + sender + ":" + message;
+            try (BufferedWriter writer = new BufferedWriter(new FileWriter(fileName, true))) {
+                writer.write(formattedMessage);
+                writer.newLine();
+            }
+            System.out.println("Saved to " + fileName + ": " + formattedMessage);
+        } catch (IOException e) {
+            e.printStackTrace();
+            JOptionPane.showMessageDialog(this, "Lỗi khi lưu tin nhắn vào lịch sử: " + e.getMessage(),
+                    "Lỗi", JOptionPane.ERROR_MESSAGE);
+        }
     }
 
     private void loadConversationHistory() {
