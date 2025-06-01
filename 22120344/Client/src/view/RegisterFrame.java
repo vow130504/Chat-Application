@@ -7,19 +7,19 @@ import java.awt.*;
 import java.awt.event.*;
 import java.sql.*;
 
-public class LoginFrame extends JFrame {
+public class RegisterFrame extends JFrame {
     private JTextField usernameField;
     private JPasswordField passwordField;
 
-    public LoginFrame() {
+    public RegisterFrame() {
         initUI();
         setupWindow();
     }
 
     private void initUI() {
-        setTitle("Đăng nhập");
+        setTitle("Đăng ký");
         setSize(400, 300);
-        setDefaultCloseOperation(EXIT_ON_CLOSE);
+        setDefaultCloseOperation(DISPOSE_ON_CLOSE);
 
         JPanel mainPanel = new JPanel();
         mainPanel.setLayout(new BoxLayout(mainPanel, BoxLayout.Y_AXIS));
@@ -36,17 +36,12 @@ public class LoginFrame extends JFrame {
         mainPanel.add(createLabeledField("Mật khẩu:", passwordField));
         mainPanel.add(Box.createVerticalStrut(20));
 
-        JButton loginButton = new JButton("Đăng nhập");
-        styleButton(loginButton, new Color(70, 130, 180));
-        loginButton.addActionListener(this::login);
-
         JButton registerButton = new JButton("Đăng ký");
         styleButton(registerButton, new Color(100, 100, 100));
-        registerButton.addActionListener(this::openRegisterFrame);
+        registerButton.addActionListener(this::register);
 
         JPanel buttonPanel = new JPanel();
         buttonPanel.setBackground(Color.WHITE);
-        buttonPanel.add(loginButton);
         buttonPanel.add(registerButton);
 
         mainPanel.add(buttonPanel);
@@ -75,7 +70,7 @@ public class LoginFrame extends JFrame {
         setLocationRelativeTo(null);
     }
 
-    private void login(ActionEvent e) {
+    private void register(ActionEvent e) {
         String username = usernameField.getText().trim();
         String password = new String(passwordField.getPassword());
 
@@ -86,53 +81,31 @@ public class LoginFrame extends JFrame {
         }
 
         try (Connection conn = DatabaseConnection.getConnection()) {
-            try (PreparedStatement stmt = conn.prepareStatement(
-                    "SELECT * FROM users WHERE username = ? AND password = ?")) {
-
-                stmt.setString(1, username);
-                stmt.setString(2, password);
-                ResultSet rs = stmt.executeQuery();
-
+            try (PreparedStatement checkStmt = conn.prepareStatement(
+                    "SELECT username FROM users WHERE username = ?")) {
+                checkStmt.setString(1, username);
+                ResultSet rs = checkStmt.executeQuery();
                 if (rs.next()) {
-                    updateOnlineStatus(username, true);
-                    JOptionPane.showMessageDialog(this, "Đăng nhập thành công!",
-                            "Thành công", JOptionPane.INFORMATION_MESSAGE);
-                    openChatFrame(username);
-                    dispose();
-                } else {
-                    JOptionPane.showMessageDialog(this, "Tên người dùng hoặc mật khẩu không đúng.",
+                    JOptionPane.showMessageDialog(this, "Tên người dùng đã tồn tại.",
                             "Lỗi", JOptionPane.ERROR_MESSAGE);
+                    return;
                 }
             }
+
+            try (PreparedStatement stmt = conn.prepareStatement(
+                    "INSERT INTO users (username, password, is_online) VALUES (?, ?, ?)")) {
+                stmt.setString(1, username);
+                stmt.setString(2, password);
+                stmt.setBoolean(3, false);
+                stmt.executeUpdate();
+                JOptionPane.showMessageDialog(this, "Đăng ký thành công! Vui lòng đăng nhập.",
+                        "Thành công", JOptionPane.INFORMATION_MESSAGE);
+                dispose(); // Đóng hộp thoại đăng ký
+            }
         } catch (SQLException ex) {
-            JOptionPane.showMessageDialog(this, "Lỗi kết nối cơ sở dữ liệu:\n" + ex.getMessage(),
+            JOptionPane.showMessageDialog(this, "Lỗi đăng ký:\n" + ex.getMessage(),
                     "Lỗi", JOptionPane.ERROR_MESSAGE);
             ex.printStackTrace();
         }
-    }
-
-    private void openRegisterFrame(ActionEvent e) {
-        RegisterFrame registerFrame = new RegisterFrame();
-        registerFrame.setVisible(true);
-        ChatApplication.centerWindow(registerFrame);
-    }
-
-    private void updateOnlineStatus(String username, boolean status) {
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(
-                     "UPDATE users SET is_online = ? WHERE username = ?")) {
-            stmt.setBoolean(1, status);
-            stmt.setString(2, username);
-            stmt.executeUpdate();
-        } catch (SQLException ex) {
-            System.err.println("Lỗi cập nhật trạng thái online: " + ex.getMessage());
-            ex.printStackTrace();
-        }
-    }
-
-    private void openChatFrame(String username) {
-        ChatFrame chatFrame = new ChatFrame(username);
-        chatFrame.setVisible(true);
-        ChatApplication.centerWindow(chatFrame);
     }
 }
